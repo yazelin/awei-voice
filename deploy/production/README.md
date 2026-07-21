@@ -77,7 +77,9 @@ health 必須分開列出 `synthesizer`（台語）與 `mandarin_synthesizer`，
 
 ## 納入既有 nginx
 
-1. 將 `nginx/00-awei-voice-http.conf.example` 放入 nginx 的 `http` context。
+1. 將 `nginx/01-awei-voice-http.conf.example` 以 `01-awei-voice-http.conf`
+   放入 nginx 的 `http` context；檔名必須排在既有 `00-taigi-http.conf` 後，讓
+   共用的 `map_hash_bucket_size` 先於所有新 `map` 解析。
 2. 將 `nginx/awei-voice-locations.inc` 放入既有 `ching-tech.ddns.net` HTTPS
    `server` block。保留 `.inc`，不可讓 `conf.d/*.conf` 在 http context 直接載入
    location。

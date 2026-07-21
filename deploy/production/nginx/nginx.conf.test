@@ -6,7 +6,9 @@ events { worker_connections 128; }
 
 http {
     include /etc/nginx/mime.types;
-    include /config/00-awei-voice-http.conf.example;
+    # Mirror the production directive parsed before Awei's maps.
+    map_hash_bucket_size 128;
+    include /config/01-awei-voice-http.conf.example;
 
     server {
         listen 8080;

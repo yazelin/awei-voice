@@ -33,13 +33,14 @@ def test_production_compose_is_private_bounded_and_uses_separate_quota():
 
 def test_nginx_uses_exact_pages_origin_and_only_new_base_path():
     http = (
-        DEPLOY / "nginx" / "00-awei-voice-http.conf.example"
+        DEPLOY / "nginx" / "01-awei-voice-http.conf.example"
     ).read_text(encoding="utf-8")
     locations = (
         DEPLOY / "nginx" / "awei-voice-locations.inc"
     ).read_text(encoding="utf-8")
 
     assert '"https://yazelin.github.io" 1;' in http
+    assert "\nmap_hash_bucket_size " not in http
     assert "default 0;" in http
     assert "$binary_remote_addr" in http
     assert "server awei-voice-backend:8765 resolve;" in http

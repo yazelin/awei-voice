@@ -1,5 +1,7 @@
-# Load once in nginx's `http` context. The key is the direct connection IP;
-# never trust a public request's X-Forwarded-For as the rate-limit identity.
+# Load once in nginx's `http` context, after the existing
+# `00-taigi-http.conf`. That earlier file establishes `map_hash_bucket_size`
+# before any map is parsed. The key here is the direct connection IP; never
+# trust a public request's X-Forwarded-For as the rate-limit identity.
 map $http_origin $awei_web_origin_allowed {
     default 0;
     "https://yazelin.github.io" 1;
