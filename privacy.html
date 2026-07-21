@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#9a3412" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>隱私說明｜阿瑋好聲音</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#privacy-content">跳到主要內容</a>
+    <header class="site-header">
+      <div class="brand-block">
+        <img class="brand-icon" src="./icon.svg" alt="" width="64" height="64" />
+        <div>
+          <p class="eyebrow">阿瑋好聲音</p>
+          <h1>隱私說明</h1>
+        </div>
+      </div>
+      <a class="button button-secondary" href="./">回到朗讀工具</a>
+    </header>
+    <main id="privacy-content" class="page-shell">
+      <article class="truth-card">
+        <p><strong>生效日：2026-07-21</strong></p>
+        <h2>文件先留在你的裝置</h2>
+        <p>
+          輸入、貼上或匯入的 TXT、Markdown、PDF、DOCX 都先在瀏覽器內解析。選取文件不會自動上傳；完整原文預設只存在目前分頁。
+        </p>
+        <h2>什麼時候會送出文字？</h2>
+        <p>
+          「裝置語音」不連本專案的自訂 TTS endpoint，但標為「可能需連網」的系統 voice 仍可能由瀏覽器、作業系統或其語音供應者處理文字；即使標成「裝置內」，也應實際斷網確認。只有選擇台語、本機服務或省流量服務，並按下「開始朗讀」後，本專案才會把當下需要合成的文字分段送到畫面上指定的 endpoint。省流量模式每段最多 280 字。
+        </p>
+        <h2>邀請碼與服務網址</h2>
+        <p>
+          服務網址可留到下次使用。Bearer 邀請碼只放在這個分頁的 sessionStorage，不會進入網址、Service Worker、音訊快取或永久儲存；關閉分頁後消失。
+        </p>
+        <h2>保存的台語語音</h2>
+        <p>
+          保存預設關閉。勾選後，音訊、台語稿、provider 與必要 cache metadata 會存到 IndexedDB；上限 50 MiB，採 7 天 LRU，可在首頁逐筆下載／刪除或全部刪除。瀏覽器或使用者仍可能清除這些資料。
+        </p>
+        <h2>不做什麼</h2>
+        <p>
+          本專案沒有廣告、analytics、telemetry 或追蹤像素，不建立使用者輪廓、不出售資料。遠端語音服務與 GitHub Pages 各有自己的資料處理政策。
+        </p>
+        <h2>問題與刪除</h2>
+        <p>
+          本機資料可在首頁或瀏覽器站台設定清除。問題可在
+          <a href="https://github.com/yazelin/awei-voice/issues">GitHub Issues</a>
+          回報；Issue 是公開頁面，請勿貼文件全文、邀請碼、API key 或個人資料。
+        </p>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <p>MIT © 2026 林亞澤</p>
+      <p><a href="./THIRD_PARTY_LICENSES.txt">第三方套件授權全文</a></p>
+    </footer>
+  </body>
+</html>

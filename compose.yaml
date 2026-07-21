@@ -1,0 +1,68 @@
+name: awei-voice
+
+services:
+  backend:
+    image: awei-voice-server:local
+    build:
+      context: ./server
+      args:
+        INSTALL_LOCAL_MMS: "${AWEI_INSTALL_LOCAL_MMS:-1}"
+    environment:
+      AWEI_ALLOWED_WEB_ORIGINS: "${AWEI_ALLOWED_WEB_ORIGINS:-}"
+      AWEI_ALLOW_LOCALHOST_ORIGINS: "${AWEI_ALLOW_LOCALHOST_ORIGINS:-true}"
+      TAIGI_PROVIDER_MODE: "${TAIGI_PROVIDER_MODE:-concrete}"
+      TAIGI_TRANSLATOR_PROVIDER: "${TAIGI_TRANSLATOR_PROVIDER:-ollama}"
+      TAIGI_TTS_PROVIDER: "${TAIGI_TTS_PROVIDER:-mms}"
+      TAIGI_OLLAMA_BASE_URL: "${TAIGI_OLLAMA_BASE_URL:-http://ollama:11434}"
+      TAIGI_OLLAMA_MODEL: "${TAIGI_OLLAMA_MODEL:-qwen3:4b-instruct-2507-q4_K_M}"
+      TAIGI_OPENAI_BASE_URL: "${TAIGI_OPENAI_BASE_URL:-}"
+      TAIGI_OPENAI_API_KEY: "${TAIGI_OPENAI_API_KEY:-}"
+      TAIGI_OPENAI_MODEL: "${TAIGI_OPENAI_MODEL:-}"
+      TAIGI_GEMINI_BASE_URL: "${TAIGI_GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}"
+      TAIGI_GEMINI_API_KEY: "${TAIGI_GEMINI_API_KEY:-}"
+      TAIGI_GEMINI_MODEL: "${TAIGI_GEMINI_MODEL:-gemini-3.5-flash}"
+      TAIGI_MMS_MODEL: "${TAIGI_MMS_MODEL:-facebook/mms-tts-nan}"
+      TAIGI_MMS_DEVICE: "${TAIGI_MMS_DEVICE:-cpu}"
+      TAIGI_MMS_TIMEOUT_SECONDS: "${TAIGI_MMS_TIMEOUT_SECONDS:-180}"
+      TAIGI_REMOTE_TTS_URL: "${TAIGI_REMOTE_TTS_URL:-}"
+      TAIGI_REMOTE_TTS_API_KEY: "${TAIGI_REMOTE_TTS_API_KEY:-}"
+      TAIGI_REQUIRE_ACCESS_TOKEN: "${TAIGI_REQUIRE_ACCESS_TOKEN:-false}"
+      TAIGI_ALLOW_DIRECT_SYNTHESIS: "false"
+      TAIGI_ACCESS_TOKEN_HASHES: "${TAIGI_ACCESS_TOKEN_HASHES:-}"
+      TAIGI_QUOTA_DATABASE_PATH: /var/lib/awei/quota.sqlite3
+    ports:
+      - "127.0.0.1:${AWEI_BACKEND_PORT:-8765}:8765"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    volumes:
+      - model-cache:/var/cache/awei
+      - quota-data:/var/lib/awei
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    pids_limit: 512
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+  # Optional local translator. Pull the language model explicitly before
+  # expecting offline synthesis; this service does not hide that download.
+  ollama:
+    profiles: ["local-model"]
+    image: ollama/ollama:0.11.10
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    expose:
+      - "11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  model-cache:
+  quota-data:
+  ollama-data:

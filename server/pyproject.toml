@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "awei-voice-server"
+version = "0.1.0"
+description = "Web-origin wrapper for the Awei Voice Taiwanese Hokkien synthesis backend"
+requires-python = ">=3.12"
+dependencies = [
+  "taigi-news-reader-backend @ git+https://github.com/yazelin/taigi-news-reader.git@967d7370fb5f3b22cc4492c5ee5753fba3ae2904#subdirectory=backend",
+]
+
+[project.optional-dependencies]
+# Keep these ranges aligned with the pinned upstream backend's `tts` extra.
+# They stay optional so the deterministic mock smoke does not download models.
+mms = [
+  "torch>=2.6,<3",
+  "transformers>=4.53,<6",
+  "uroman>=1.3.1.1,<2",
+]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<10",
+  "pytest-asyncio>=1.1,<2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["awei_voice_server"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+asyncio_mode = "auto"
+testpaths = ["../test_server"]

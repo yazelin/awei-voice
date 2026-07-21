@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">阿瑋好聲音</title>
+  <desc id="desc">橘色圓角方塊內有白色對話泡泡與聲波</desc>
+  <rect width="512" height="512" rx="112" fill="#9a3412"/>
+  <path fill="#fffaf0" d="M102 112h308a42 42 0 0 1 42 42v190a42 42 0 0 1-42 42H245l-93 70v-70h-50a42 42 0 0 1-42-42V154a42 42 0 0 1 42-42Z"/>
+  <path fill="none" stroke="#9a3412" stroke-linecap="round" stroke-width="28" d="M151 264h34m38-54v108m54-142v176m54-112v48m54-80v112"/>
+</svg>
+

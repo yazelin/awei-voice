@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#9a3412" />
+    <meta
+      name="description"
+      content="阿瑋好聲音：貼上文字或匯入文件，用大字介面聽台灣國語或台語。"
+    />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <title>阿瑋好聲音｜台灣國語與台語朗讀</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要內容</a>
+
+    <header class="site-header">
+      <div class="brand-block">
+        <img class="brand-icon" src="./icon.svg" alt="" width="64" height="64" />
+        <div>
+          <p class="eyebrow">阿瑋許的願</p>
+          <h1>阿瑋好聲音</h1>
+          <p class="tagline">台灣國語、台語，貼上就唸給你聽</p>
+        </div>
+      </div>
+      <div id="network-status" class="network-status" role="status">
+        正在檢查網路
+      </div>
+    </header>
+
+    <main id="main-content" class="page-shell">
+      <noscript>
+        <p class="notice notice-error">這個朗讀工具需要啟用 JavaScript。</p>
+      </noscript>
+
+      <form id="reader-form" class="reader-form" novalidate>
+        <section class="step-card" aria-labelledby="input-heading">
+          <div class="step-heading">
+            <span class="step-number" aria-hidden="true">1</span>
+            <div>
+              <h2 id="input-heading">放入想聽的文字</h2>
+              <p>直接貼上，或從 TXT、Markdown、PDF、DOCX 匯入。</p>
+            </div>
+          </div>
+
+          <label class="sr-only" for="source-text">想朗讀的文字</label>
+          <textarea
+            id="source-text"
+            name="sourceText"
+            rows="9"
+            maxlength="30000"
+            placeholder="例如：今天天氣很好，我們一起去公園散步。"
+            aria-describedby="text-help text-count file-status"
+          ></textarea>
+          <div class="input-meta">
+            <p id="text-help">最多 30,000 字，文件只在這台裝置內讀取。</p>
+            <p id="text-count" class="text-count">0 / 30,000 字</p>
+          </div>
+
+          <div class="file-row">
+            <label class="button button-secondary file-button" for="document-file">
+              匯入文件
+              <input
+                id="document-file"
+                class="visually-hidden-file"
+                name="documentFile"
+                type="file"
+                accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              />
+            </label>
+            <button id="clear-text" class="button button-quiet" type="button">
+              清除文字
+            </button>
+          </div>
+          <p id="file-status" class="field-status" aria-live="polite"></p>
+        </section>
+
+        <section class="step-card" aria-labelledby="language-heading">
+          <div class="step-heading">
+            <span class="step-number" aria-hidden="true">2</span>
+            <div>
+              <h2 id="language-heading">想聽哪一種語言？</h2>
+              <p>台語目前是 Beta，失敗時不會拿國語聲音冒充。</p>
+            </div>
+          </div>
+
+          <fieldset class="choice-grid language-grid">
+            <legend class="sr-only">朗讀語言</legend>
+            <label class="choice-card">
+              <input type="radio" name="language" value="mandarin" checked />
+              <span class="choice-title">台灣國語</span>
+              <span class="choice-copy">使用裝置標示為 zh-TW 的聲音</span>
+            </label>
+            <label class="choice-card">
+              <input type="radio" name="language" value="taigi" />
+              <span class="choice-title">台語 <small>Beta</small></span>
+              <span class="choice-copy">真正台語裝置聲音或台語語音服務</span>
+            </label>
+          </fieldset>
+        </section>
+
+        <section class="step-card" aria-labelledby="mode-heading">
+          <div class="step-heading">
+            <span class="step-number" aria-hidden="true">3</span>
+            <div>
+              <h2 id="mode-heading">選擇連線方式</h2>
+              <p>每種方式的限制不同，系統會在開始前檢查。</p>
+            </div>
+          </div>
+
+          <fieldset class="choice-grid mode-grid">
+            <legend class="sr-only">連線方式</legend>
+            <label class="choice-card">
+              <input type="radio" name="connection" value="device" checked />
+              <span class="choice-title">裝置語音</span>
+              <span class="choice-copy">不連自訂服務；系統聲音仍可能需要網路</span>
+            </label>
+            <label class="choice-card">
+              <input type="radio" name="connection" value="local" />
+              <span class="choice-title">本機服務</span>
+              <span class="choice-copy">家人先裝好模型，之後可以不連外網</span>
+            </label>
+            <label class="choice-card">
+              <input type="radio" name="connection" value="saving" />
+              <span class="choice-title">省流量服務</span>
+              <span class="choice-copy">逐段產生、產完就播，保存後重播不耗流量</span>
+            </label>
+          </fieldset>
+
+          <div id="service-settings" class="service-settings" hidden>
+            <h3>台語語音服務</h3>
+            <label for="backend-url">服務網址</label>
+            <input
+              id="backend-url"
+              name="backendUrl"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              placeholder="https://voice.example.com"
+              aria-describedby="backend-help backend-status"
+            />
+            <p id="backend-help" class="field-help">
+              遠端只接受 HTTPS；本機可用 http://127.0.0.1:8765。
+            </p>
+            <p id="local-license-help" class="field-help" hidden>
+              內附參考後端的 MMS Min Nan 模型採 CC BY-NC 4.0，只能非商用，且尚未通過母語試聽。
+              <a href="https://github.com/yazelin/awei-voice/blob/main/THIRD_PARTY_NOTICES.md#meta-facebookmms-tts-nan">查看授權與限制</a>
+            </p>
+
+            <label for="backend-token">邀請碼（如果服務需要）</label>
+            <input
+              id="backend-token"
+              name="backendToken"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <p class="field-help">邀請碼只留在這個分頁，關閉後消失。</p>
+
+            <div class="service-actions">
+              <button id="check-backend" class="button button-secondary" type="button">
+                檢查語音服務
+              </button>
+              <p id="backend-status" class="field-status" aria-live="polite"></p>
+            </div>
+          </div>
+        </section>
+
+        <section class="step-card compact-card" aria-labelledby="options-heading">
+          <div class="step-heading">
+            <span class="step-number" aria-hidden="true">4</span>
+            <div>
+              <h2 id="options-heading">調整後開始</h2>
+            </div>
+          </div>
+
+          <div class="option-row">
+            <label for="voice-select">聲音</label>
+            <select id="voice-select" name="voice">
+              <option value="">正在讀取裝置聲音…</option>
+            </select>
+          </div>
+
+          <fieldset class="rate-fieldset">
+            <legend>速度</legend>
+            <div class="rate-choices">
+              <label><input type="radio" name="rate" value="0.75" /> 慢一點</label>
+              <label><input type="radio" name="rate" value="1" checked /> 正常</label>
+              <label><input type="radio" name="rate" value="1.25" /> 快一點</label>
+            </div>
+          </fieldset>
+
+          <label id="save-audio-row" class="check-row" hidden>
+            <input id="save-audio" type="checkbox" />
+            <span>保存產生的台語語音，之後可以離線重播</span>
+          </label>
+
+          <button id="start-reading" class="button button-primary start-button" type="submit">
+            開始朗讀
+          </button>
+          <p id="form-error" class="notice notice-error" role="alert" hidden></p>
+        </section>
+      </form>
+
+      <section id="player-panel" class="player-panel" aria-labelledby="player-heading" hidden>
+        <div class="player-heading-row">
+          <div>
+            <p class="eyebrow">正在朗讀</p>
+            <h2 id="player-heading">播放控制</h2>
+          </div>
+          <p id="player-progress">第 0 段，共 0 段</p>
+        </div>
+        <p id="player-status" class="player-status" aria-live="polite">準備中</p>
+        <p id="current-chunk" class="current-chunk"></p>
+        <progress id="reading-progress" value="0" max="1">0%</progress>
+
+        <div class="player-controls">
+          <button id="previous-chunk" class="button button-secondary" type="button">上一段</button>
+          <button id="pause-reading" class="button button-primary" type="button">暫停</button>
+          <button id="next-chunk" class="button button-secondary" type="button">下一段</button>
+          <button id="stop-reading" class="button button-danger" type="button">停止</button>
+        </div>
+
+        <details class="taigi-details">
+          <summary>查看這段的台語稿與語音來源</summary>
+          <dl>
+            <div><dt>語音來源</dt><dd id="provider-name">尚未取得</dd></div>
+            <div><dt>台語稿</dt><dd id="taigi-text">尚未取得</dd></div>
+          </dl>
+        </details>
+      </section>
+
+      <section class="library-card" aria-labelledby="library-heading">
+        <div class="library-heading-row">
+          <div>
+            <h2 id="library-heading">這台裝置保存的語音</h2>
+            <p id="library-summary">尚未保存語音。</p>
+          </div>
+          <button id="clear-library" class="button button-quiet" type="button" disabled>
+            全部刪除
+          </button>
+        </div>
+        <ul id="saved-audio-list" class="saved-audio-list" aria-label="已保存的台語語音" hidden></ul>
+      </section>
+
+      <section class="truth-card" aria-labelledby="truth-heading">
+        <h2 id="truth-heading">「離線」到底能做什麼？</h2>
+        <dl class="truth-list">
+          <div>
+            <dt>網頁與文件</dt>
+            <dd>安裝過後可以斷網開啟，文件一直在你的瀏覽器裡解析。</dd>
+          </div>
+          <div>
+            <dt>台灣國語</dt>
+            <dd>只有裝置列出 zh-TW 聲音時可用；標為「裝置內」仍應實際斷網測試。</dd>
+          </div>
+          <div>
+            <dt>台語</dt>
+            <dd>需要真正台語裝置聲音、本機後端，或先前保存的語音，不會拿國語替代。</dd>
+          </div>
+        </dl>
+        <p>
+          技術與品質限制詳見
+          <a href="https://github.com/yazelin/awei-voice#能力邊界">README 能力邊界</a>。
+        </p>
+      </section>
+    </main>
+
+    <div id="update-toast" class="update-toast" role="status" hidden>
+      <span>有新版可以使用。</span>
+      <button id="apply-update" class="button button-secondary" type="button">更新</button>
+    </div>
+
+    <footer class="site-footer">
+      <p>這是阿瑋許下的願望，由亞澤把它做成可以一起改進的開源工具。</p>
+      <nav aria-label="相關連結">
+        <a href="https://github.com/yazelin/awei-voice">GitHub</a>
+        <a href="https://yazelin.github.io/">亞澤的網站</a>
+        <a href="https://www.facebook.com/yazelin.j303">Facebook</a>
+        <a href="https://buymeacoffee.com/yazelin">請亞澤喝杯咖啡</a>
+        <a href="./privacy.html">隱私說明</a>
+        <a href="./THIRD_PARTY_LICENSES.txt">第三方授權</a>
+      </nav>
+      <p class="copyright">MIT © 2026 林亞澤</p>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
