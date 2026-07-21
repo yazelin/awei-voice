@@ -20,6 +20,27 @@ export class TextValidationError extends Error {
 // Keep newlines and tabs (which normalizeText handles), while rejecting control
 // characters that can make the preview differ from the text sent for synthesis.
 const INVISIBLE_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u;
+const NON_ROMANIZED_SCRIPT = /[\u2e80-\u2fff\u3040-\u30ff\u3100-\u312f\u31a0-\u31bf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/u;
+const MMS_NAN_ALLOWED = new Set(Array.from(
+  "abceghijklmnopstuàáâèéêìíîòóôùúûāēīńōūǹḿ\u0302\u0304\u030d\u0358 '-"
+));
+const MMS_NAN_FORMAT_MAP: Readonly<Record<string, string>> = {
+  "ⁿ": "nn",
+  "‘": "'",
+  "’": "'",
+  "‛": "'",
+  "ʼ": "'",
+  "＇": "'",
+  "‐": "-",
+  "‑": "-",
+  "‒": "-",
+  "–": "-",
+  "—": "-",
+  "―": "-",
+  "﹘": "-",
+  "﹣": "-",
+  "－": "-"
+};
 
 function graphemeSegmenter(): Intl.Segmenter | null {
   if (typeof Intl.Segmenter !== "function") return null;
@@ -124,6 +145,55 @@ export function normalizeAndValidateText(input: string, maxLength = MAX_TEXT_LEN
   const result = validateText(input, maxLength);
   if (!result.ok) throw new TextValidationError(result.code, result.message);
   return result.text;
+}
+
+export type RomanizedTaigiValidationResult =
+  | { ok: true; text: string }
+  | { ok: false; message: string };
+
+/** Normalize and admit only the exact facebook/mms-tts-nan POJ vocabulary. */
+export function validateRomanizedTaigiInput(input: string): RomanizedTaigiValidationResult {
+  if (NON_ROMANIZED_SCRIPT.test(input)) {
+    return { ok: false, message: "POJ 直接朗讀不接受漢字；請改用「華語翻成台語」。" };
+  }
+
+  const formatted = Array.from(String(input), (character) =>
+    MMS_NAN_FORMAT_MAP[character] ?? character
+  ).join("");
+  const punctuationAsSpaces = Array.from(formatted, (character) =>
+    !MMS_NAN_ALLOWED.has(character) && /\p{Punctuation}/u.test(character)
+      ? " "
+      : character
+  ).join("");
+  const text = punctuationAsSpaces
+    .split(/\s+/u)
+    .filter(Boolean)
+    .join(" ")
+    .normalize("NFC")
+    .toLowerCase();
+
+  if (!text) {
+    return { ok: false, message: "請輸入使用調符的 POJ 羅馬字。" };
+  }
+  const unsupported = [...new Set(Array.from(text).filter((character) =>
+    !MMS_NAN_ALLOWED.has(character)
+  ))];
+  if (unsupported.some((character) => /[0-9]/u.test(character))) {
+    return {
+      ok: false,
+      message: "目前不支援數字調號（例如 tai5-gi2）；請改用 á、à、â、ā 等調符 POJ。"
+    };
+  }
+  if (unsupported.length > 0) {
+    return {
+      ok: false,
+      message: `這個語音模型不支援字元「${unsupported.slice(0, 6).join("、")}」；請改用調符 POJ。`
+    };
+  }
+  if (![...text].some((character) => MMS_NAN_ALLOWED.has(character) && /\p{Letter}/u.test(character))) {
+    return { ok: false, message: "POJ 直接朗讀至少需要一個可朗讀的字母。" };
+  }
+  return { ok: true, text };
 }
 
 const SENTENCE_END = /[。！？!?；;…]/u;

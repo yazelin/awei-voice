@@ -6,6 +6,7 @@ import {
   normalizeAndValidateText,
   normalizeText,
   splitText,
+  validateRomanizedTaigiInput,
   validateText
 } from "../src/lib/text";
 
@@ -20,6 +21,32 @@ describe("text", () => {
     expect(validateText("正常\u200b藏字")).toMatchObject({ ok: false, code: "control_character" });
     expect(validateText("一二三", 2)).toMatchObject({ ok: false, code: "too_long", length: 3 });
     expect(() => normalizeAndValidateText("\u0001")).toThrowError(TextValidationError);
+  });
+
+  it("normalizes direct POJ to the exact MMS vocabulary", () => {
+    expect(validateRomanizedTaigiInput(" KÍN—á  ji̍t，thiⁿ-khì! ")).toEqual({
+      ok: true,
+      text: "kín-á ji̍t thinn-khì"
+    });
+    expect(validateRomanizedTaigiInput("goá ’ beh")).toEqual({
+      ok: true,
+      text: "goá ' beh"
+    });
+  });
+
+  it("rejects Han text, numeric tones, and letters outside the MMS POJ vocabulary", () => {
+    expect(validateRomanizedTaigiInput("今仔日 thiⁿ-khì chin hó.")).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/不接受漢字/u)
+    });
+    expect(validateRomanizedTaigiInput("tai5-gi2")).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/數字調號/u)
+    });
+    expect(validateRomanizedTaigiInput("tair-gi")).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/不支援字元.*r/u)
+    });
   });
 
   it("prefers Chinese paragraph and sentence boundaries", () => {

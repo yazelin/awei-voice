@@ -7,6 +7,7 @@ export type BackendErrorCode =
   | "unsafe_endpoint"
   | "invalid_response"
   | "invalid_provider"
+  | "unsupported_source"
   | "request_failed"
   | "timeout"
   | "busy";
@@ -28,22 +29,33 @@ export interface BackendHealth {
   mode: "concrete" | "mock";
   translator: string;
   synthesizer: string;
+  mandarinSynthesizer: string | null;
+  mandarinOnlineBackup: boolean;
   provider: string;
+  sourceLanguages: SpeechSourceLanguage[];
   targetLanguages: string[];
   isTestProvider: boolean;
 }
+
+export type SpeechSourceLanguage = "zh-TW" | "nan-Latn-TW";
+export type SpeechTargetLanguage = "zh-TW" | "nan-TW";
+export type TaigiSourceLanguage = SpeechSourceLanguage;
 
 export interface SynthesisResult {
   audio: Blob;
   audioBase64: string;
   mimeType: string;
   provider: string;
+  spokenText: string;
   taigiText: string;
+  targetLanguage: SpeechTargetLanguage;
   jobId: string;
 }
 
 export interface SynthesizeRequest {
   text: string;
+  sourceLanguage?: SpeechSourceLanguage;
+  targetLanguage?: SpeechTargetLanguage;
   rate?: number;
   signal?: AbortSignal;
   onJobCreated?: (jobId: string) => void | Promise<void>;
@@ -113,6 +125,11 @@ export function isSafeEndpoint(input: string): boolean {
   }
 }
 
+/** Credentials are isolated by the exact normalized service endpoint. */
+export function sessionTokenKeyForEndpoint(endpoint: string): string {
+  return `${SESSION_TOKEN_KEY}:${encodeURIComponent(validateEndpoint(endpoint))}`;
+}
+
 function defaultSessionStorage(): StorageLike | null {
   try {
     return typeof window === "undefined" ? null : window.sessionStorage;
@@ -172,6 +189,14 @@ function normalizedLanguage(value: unknown): string | null {
   }
 }
 
+function normalizedSourceLanguage(value: unknown): SpeechSourceLanguage | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const compact = value.trim().replace(/_/gu, "-").toLowerCase();
+  if (compact === "zh-tw" || compact === "zh-hant-tw") return "zh-TW";
+  if (compact === "nan-latn-tw") return "nan-Latn-TW";
+  return null;
+}
+
 function taigiProviderLabel(value: string): boolean {
   return /(?:mms[-_:/]tts[-_:/]nan|(?:tai[\s_-]*gi|taigi)|taiwan(?:ese)?[\s_-]*hokkien|(?:臺灣|台灣)?(?:臺語|台語)|臺灣閩南語|台灣閩南語)/iu.test(value);
 }
@@ -189,6 +214,9 @@ export function validateBackendHealth(value: unknown, allowTestProvider = false)
   const mode = body.mode;
   const translator = typeof body.translator === "string" ? body.translator.trim() : "";
   const synthesizer = typeof body.synthesizer === "string" ? body.synthesizer.trim() : "";
+  const mandarinSynthesizer = typeof body.mandarin_synthesizer === "string" && body.mandarin_synthesizer.trim()
+    ? body.mandarin_synthesizer.trim()
+    : null;
   const provider = typeof body.provider === "string" && body.provider.trim()
     ? body.provider.trim()
     : `${translator}+${synthesizer}`;
@@ -200,12 +228,42 @@ export function validateBackendHealth(value: unknown, allowTestProvider = false)
   const advertised = [
     ...stringArray(body.target_languages),
     ...stringArray(body.supported_languages),
-    ...stringArray((body.capabilities as Record<string, unknown> | undefined)?.target_languages),
     ...(typeof body.target_language === "string" ? [body.target_language] : [])
   ];
   const targetLanguages = [...new Set(advertised.map(normalizedLanguage).filter((item): item is string => Boolean(item)))];
+  const sourceAdvertised = [
+    ...stringArray(body.source_languages),
+    ...stringArray(body.input_languages),
+    ...(typeof body.source_language === "string" ? [body.source_language] : [])
+  ];
+  const sourceLanguages = [...new Set(
+    sourceAdvertised
+      .map(normalizedSourceLanguage)
+      .filter((item): item is SpeechSourceLanguage => Boolean(item))
+  )];
   const explicitlyAdvertised = advertised.length > 0;
   const advertisesNanTw = targetLanguages.includes("nan-TW");
+  const advertisesZhTw = targetLanguages.includes("zh-TW");
+  const capabilities = Array.isArray(body.capabilities)
+    ? body.capabilities.filter(
+      (item): item is Record<string, unknown> => Boolean(item && typeof item === "object")
+    )
+    : [];
+  const mandarinCapability = capabilities.find((capability) =>
+    capability.source_language === "zh-TW" &&
+    capability.target_language === "zh-TW"
+  );
+  const expectedMandarinProvider = mandarinSynthesizer
+    ? `direct:zh-TW+${mandarinSynthesizer}`
+    : null;
+  const mandarinOnlineBackup = Boolean(
+    mandarinCapability &&
+    mandarinCapability.mode === "online-mandarin-backup" &&
+    mandarinCapability.provider === expectedMandarinProvider &&
+    mandarinCapability.network_required === true &&
+    mandarinCapability.unofficial === true &&
+    mandarinCapability.sla_guaranteed === false
+  );
   // A translator mentioning Taigi is not enough: the synthesizer itself must
   // advertise nan/Taiwanese Hokkien unless the health contract lists nan-TW.
   const labelIdentifiesTaigi = taigiProviderLabel(synthesizer);
@@ -221,13 +279,28 @@ export function validateBackendHealth(value: unknown, allowTestProvider = false)
         : "語音服務未明確標示支援 nan-TW／Taiwanese Hokkien，已停止以免誤用國語聲音。"
     );
   }
+  if (advertisesZhTw && !mandarinSynthesizer) {
+    throw new BackendError(
+      "invalid_response",
+      "語音服務宣告支援 zh-TW，但沒有提供 mandarin_synthesizer 身分。"
+    );
+  }
+  if (advertisesZhTw && !mandarinOnlineBackup) {
+    throw new BackendError(
+      "invalid_response",
+      "語音服務未完整揭露線上台灣國語的網路、非官方來源與可用率限制。"
+    );
+  }
 
   return {
     status: "ok",
     mode,
     translator,
     synthesizer,
+    mandarinSynthesizer,
+    mandarinOnlineBackup,
     provider,
+    sourceLanguages: sourceAdvertised.length === 0 ? ["zh-TW"] : sourceLanguages,
     targetLanguages: advertisesNanTw ? [...new Set([...targetLanguages, "nan-TW"])] : ["nan-TW"],
     isTestProvider
   };
@@ -264,14 +337,82 @@ function defaultDelay(milliseconds: number, signal: AbortSignal): Promise<void> 
   });
 }
 
-function responseMessage(body: unknown, status: number): string {
+function serverResponseMessage(body: unknown): string | null {
   if (body && typeof body === "object") {
     const record = body as Record<string, unknown>;
     for (const candidate of [record.error, record.detail, record.message]) {
       if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
     }
   }
-  return `語音服務回傳錯誤（HTTP ${status}）。`;
+  return null;
+}
+
+function safeRetryHeader(headers: Headers, name: string): string | null {
+  const value = headers.get(name)?.trim() ?? "";
+  return value && value.length <= 128 && !/[\u0000-\u001f\u007f]/u.test(value) ? value : null;
+}
+
+function formattedRetryTime(milliseconds: number): string | null {
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return null;
+  try {
+    return new Intl.DateTimeFormat("zh-TW", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "Asia/Taipei"
+    }).format(new Date(milliseconds));
+  } catch {
+    return null;
+  }
+}
+
+function retryAdvice(headers: Headers): string {
+  const retryAfter = safeRetryHeader(headers, "Retry-After");
+  if (retryAfter) {
+    if (/^\d+$/u.test(retryAfter)) {
+      const seconds = Number(retryAfter);
+      if (Number.isSafeInteger(seconds)) {
+        return `請依 Retry-After 於 ${seconds.toLocaleString("zh-TW")} 秒後再試。`;
+      }
+    }
+    const time = formattedRetryTime(Date.parse(retryAfter));
+    if (time) return `請依 Retry-After 於 ${time} 後再試。`;
+  }
+
+  const rateLimitReset = safeRetryHeader(headers, "X-RateLimit-Reset");
+  if (rateLimitReset) {
+    const numeric = Number(rateLimitReset);
+    const milliseconds = Number.isFinite(numeric)
+      ? numeric >= 1_000_000_000_000 ? numeric : numeric * 1_000
+      : Date.parse(rateLimitReset);
+    const time = formattedRetryTime(milliseconds);
+    if (time) return `請於 ${time} 後再試（X-RateLimit-Reset）。`;
+  }
+  return "";
+}
+
+function errorResponseMessage(body: unknown, response: Response): string {
+  const status = response.status;
+  const detail = serverResponseMessage(body);
+  const retry = retryAdvice(response.headers);
+  const detailSuffix = detail ? `服務訊息：${detail}` : "";
+
+  if (status === 429) {
+    return [
+      "語音服務目前忙碌或使用額度已達上限（HTTP 429）。",
+      retry || "請稍後再試。",
+      detailSuffix
+    ].filter(Boolean).join("");
+  }
+  if ([502, 503, 504].includes(status)) {
+    return [
+      `語音服務暫時不可用（HTTP ${status}）。`,
+      retry || "請稍後再試。",
+      detailSuffix
+    ].filter(Boolean).join("");
+  }
+  return detail
+    ? `${detail}（HTTP ${status}）。${retry}`
+    : `語音服務回傳錯誤（HTTP ${status}）。${retry}`;
 }
 
 async function parseJson(response: Response): Promise<unknown> {
@@ -279,6 +420,14 @@ async function parseJson(response: Response): Promise<unknown> {
     return await response.json();
   } catch {
     throw new BackendError("invalid_response", "語音服務回傳了無法辨識的內容。", response.status);
+  }
+}
+
+async function parseErrorJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
 }
 
@@ -310,7 +459,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
   if (typeof fetchImpl !== "function") throw new TypeError("目前環境沒有可用的 fetch。");
 
   const storage = options.sessionStorage === undefined ? defaultSessionStorage() : options.sessionStorage;
-  const tokenKey = options.sessionTokenKey ?? SESSION_TOKEN_KEY;
+  const tokenKey = options.sessionTokenKey ?? sessionTokenKeyForEndpoint(baseUrl);
   const pollIntervalMs = options.pollIntervalMs ?? 1_000;
   const deadlineMs = options.deadlineMs ?? 10 * 60_000;
   const requestTimeoutMs = options.requestTimeoutMs ?? 20_000;
@@ -367,10 +516,15 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         referrerPolicy: "no-referrer"
       });
       if (response.status === 204) return { response, body: null };
-      const body = await parseJson(response);
       if (!response.ok) {
-        throw new BackendError("request_failed", responseMessage(body, response.status), response.status);
+        const body = await parseErrorJson(response);
+        throw new BackendError(
+          "request_failed",
+          errorResponseMessage(body, response),
+          response.status
+        );
       }
+      const body = await parseJson(response);
       return { response, body };
     } catch (error) {
       if (timedOut) throw new BackendError("timeout", "語音服務請求逾時，請檢查連線後再試。");
@@ -443,7 +597,13 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
     await cancelRun(run);
   }
 
-  async function createJob(run: ActiveRun, text: string, rate: number): Promise<string> {
+  async function createJob(
+    run: ActiveRun,
+    text: string,
+    sourceLanguage: SpeechSourceLanguage,
+    targetLanguage: SpeechTargetLanguage,
+    rate: number
+  ): Promise<string> {
     const { response, body } = await request(
       "/v1/synthesis-jobs",
       {
@@ -451,8 +611,8 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          source_language: "zh-TW",
-          target_language: "nan-TW",
+          source_language: sourceLanguage,
+          target_language: targetLanguage,
           rate
         })
       },
@@ -467,12 +627,21 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
     return record.job_id;
   }
 
-  function completedResult(value: unknown, jobId: string, service: BackendHealth): SynthesisResult {
+  function completedResult(
+    value: unknown,
+    jobId: string,
+    service: BackendHealth,
+    sourceLanguage: SpeechSourceLanguage,
+    targetLanguage: SpeechTargetLanguage
+  ): SynthesisResult {
     if (!value || typeof value !== "object") {
       throw new BackendError("invalid_response", "語音服務沒有回傳合成結果。");
     }
     const result = value as Record<string, unknown>;
     const taigiText = typeof result.taigi_text === "string" ? result.taigi_text.trim() : "";
+    const spokenText = typeof result.spoken_text === "string" && result.spoken_text.trim()
+      ? result.spoken_text.trim()
+      : taigiText;
     const audioBase64 = typeof result.audio_base64 === "string"
       ? result.audio_base64
       : typeof result.audio === "string" ? result.audio : "";
@@ -480,10 +649,17 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       ? result.mime_type
       : typeof result.content_type === "string" ? result.content_type : "";
     const provider = typeof result.provider === "string" ? result.provider.trim() : "";
-    const expectedProviders = new Set([service.provider, `${service.translator}+${service.synthesizer}`]);
+    const expectedProviders = sourceLanguage === "nan-Latn-TW" && targetLanguage === "nan-TW"
+      ? new Set([`direct:nan-Latn-TW+${service.synthesizer}`])
+      : targetLanguage === "zh-TW" && service.mandarinSynthesizer
+        ? new Set([`direct:zh-TW+${service.mandarinSynthesizer}`])
+        : new Set([service.provider, `${service.translator}+${service.synthesizer}`]);
 
-    if (!taigiText || !audioBase64 || !mimeType.startsWith("audio/") || !provider) {
-      throw new BackendError("invalid_response", "語音服務沒有回傳完整的台語稿、音訊與 provider。");
+    if (!spokenText || !audioBase64 || !mimeType.startsWith("audio/") || !provider) {
+      throw new BackendError("invalid_response", "語音服務沒有回傳完整的朗讀文字、音訊與 provider。");
+    }
+    if (targetLanguage === "nan-TW" && !taigiText) {
+      throw new BackendError("invalid_response", "台語服務沒有回傳台語稿，已停止播放。");
     }
     if (!expectedProviders.has(provider)) {
       throw new BackendError("invalid_provider", "合成結果的 provider 與健康檢查不一致，已拒絕播放。");
@@ -498,7 +674,9 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       audioBase64: audioBase64.replace(/^data:[^;,]+;base64,/su, ""),
       mimeType: audio.type || mimeType,
       provider,
+      spokenText,
       taigiText,
+      targetLanguage,
       jobId
     };
   }
@@ -530,7 +708,29 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       const service = await health(run.workController.signal);
       if (run.cancelled) throw abortError();
 
-      run.createPromise = createJob(run, validation.text, rate);
+      const sourceLanguage = requestValue.sourceLanguage ?? "zh-TW";
+      const targetLanguage = requestValue.targetLanguage ?? "nan-TW";
+      if (targetLanguage === "zh-TW" && sourceLanguage !== "zh-TW") {
+        throw new BackendError("unsupported_source", "台灣國語線上朗讀只接受華語文字。");
+      }
+      if (!service.sourceLanguages.includes(sourceLanguage)) {
+        throw new BackendError(
+          "unsupported_source",
+          sourceLanguage === "nan-Latn-TW"
+            ? "這個台語服務尚未支援調符 POJ 直接朗讀，請改選「華語翻成台語」。"
+            : "這個台語服務尚未支援華語翻台語。"
+        );
+      }
+      if (!service.targetLanguages.includes(targetLanguage)) {
+        throw new BackendError(
+          "invalid_provider",
+          targetLanguage === "zh-TW"
+            ? "這個語音服務尚未提供台灣國語線上朗讀。"
+            : "這個語音服務尚未提供台語朗讀。"
+        );
+      }
+
+      run.createPromise = createJob(run, validation.text, sourceLanguage, targetLanguage, rate);
       const jobId = await run.createPromise;
       if (run.cancelled) {
         await cleanup(run);
@@ -558,7 +758,13 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
           // Decode and validate before deleting so a malformed terminal result
           // still reaches the common error cleanup. A valid result is returned
           // only after the server releases this job's outstanding-owner slot.
-          const result = completedResult(record.result, jobId, service);
+          const result = completedResult(
+            record.result,
+            jobId,
+            service,
+            sourceLanguage,
+            targetLanguage
+          );
           await cleanup(run);
           if (run.cancelled || requestValue.signal?.aborted) throw abortError();
           return result;
@@ -566,7 +772,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         if (record.status === "failed") {
           throw new BackendError(
             "request_failed",
-            typeof record.error === "string" && record.error ? record.error : "台語語音產生失敗。"
+            typeof record.error === "string" && record.error ? record.error : "語音產生失敗。"
           );
         }
         if (record.status !== "pending") {
@@ -575,7 +781,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         await delay(pollIntervalMs, run.workController.signal);
         if (run.cancelled || run.workController.signal.aborted) throw abortError();
       }
-      throw new BackendError("timeout", "台語語音產生等候逾時，請稍後再試。");
+      throw new BackendError("timeout", "語音產生等候逾時，請稍後再試。");
     } catch (error) {
       if (run.jobId) {
         try {

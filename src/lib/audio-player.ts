@@ -165,7 +165,7 @@ export class AudioQueuePlayer {
       this.unlocked = true;
     } catch (error) {
       const resolved = error instanceof Error ? error : new Error("瀏覽器不允許播放音訊。");
-      throw new Error("瀏覽器尚未允許播放台語音訊，請再按一次「開始朗讀」。", {
+      throw new Error("瀏覽器尚未允許播放音訊，請再按一次播放按鈕。", {
         cause: resolved
       });
     } finally {

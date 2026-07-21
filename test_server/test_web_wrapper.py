@@ -32,13 +32,22 @@ async def request(app, method: str, path: str, **kwargs) -> httpx.Response:
         return await client.request(method, path, **kwargs)
 
 
-def mock_app(*, localhost: bool = True):
+def mock_app(
+    tmp_path: Path,
+    *,
+    localhost: bool = True,
+    require_origin: bool = False,
+):
     return create_app(
         WebSettings(
             allowed_web_origins=(WEB_ORIGIN,),
             allow_localhost_origins=localhost,
+            require_web_origin=require_origin,
         ),
-        Settings(provider_mode="mock"),
+        Settings(
+            provider_mode="mock",
+            quota_database_path=str(tmp_path / "quota.sqlite3"),
+        ),
     )
 
 
@@ -56,8 +65,8 @@ async def test_origin_configuration_fails_closed(origin: str):
         WebSettings(allowed_web_origins=(origin,))
 
 
-async def test_health_is_mock_and_does_not_load_a_model():
-    app = mock_app()
+async def test_health_is_mock_and_does_not_load_a_model(tmp_path):
+    app = mock_app(tmp_path)
     response = await request(
         app,
         "GET",
@@ -73,18 +82,55 @@ async def test_health_is_mock_and_does_not_load_a_model():
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == WEB_ORIGIN
-    assert response.json() == {
-        "status": "ok",
-        "mode": "mock",
-        "translator": "mock:taigi-translator",
-        "synthesizer": "mock:wav-synthesizer",
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["mode"] == "mock"
+    assert body["translator"] == "mock:taigi-translator"
+    assert body["synthesizer"] == "mock:wav-synthesizer"
+    assert body["mandarin_synthesizer"] == (
+        "mock:online-mandarin-backup"
+    )
+    assert body["source_languages"] == ["zh-TW", "nan-Latn-TW"]
+    assert body["target_languages"] == ["nan-TW", "zh-TW"]
+    assert body["capabilities"][-1] == {
+        "source_language": "zh-TW",
+        "target_language": "zh-TW",
+        "mode": "online-mandarin-backup",
+        "provider": "direct:zh-TW+mock:online-mandarin-backup",
+        "network_required": True,
+        "unofficial": True,
+        "sla_guaranteed": False,
     }
     assert old_extension_origin.status_code == 403
     assert "access-control-allow-origin" not in old_extension_origin.headers
 
 
-async def test_configured_web_origin_can_use_async_jobs_without_extension_id():
-    app = mock_app()
+async def test_production_origin_mode_rejects_missing_origin_only_on_v1(
+    tmp_path,
+):
+    app = mock_app(tmp_path, localhost=False, require_origin=True)
+
+    health = await request(app, "GET", "/health")
+    missing = await request(app, "GET", "/v1/access")
+    allowed = await request(
+        app,
+        "GET",
+        "/v1/access",
+        headers={"Origin": WEB_ORIGIN},
+    )
+
+    assert health.status_code == 200
+    assert missing.status_code == 403
+    assert missing.json() == {"detail": "request web origin is required"}
+    assert missing.headers["cache-control"] == "no-store"
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == WEB_ORIGIN
+
+
+async def test_configured_web_origin_can_use_async_jobs_without_extension_id(
+    tmp_path,
+):
+    app = mock_app(tmp_path)
     preflight = await request(
         app,
         "OPTIONS",
@@ -121,10 +167,14 @@ async def test_configured_web_origin_can_use_async_jobs_without_extension_id():
     assert deleted.status_code == 204
 
 
-async def test_legacy_extension_environment_is_ignored(monkeypatch):
+async def test_legacy_extension_environment_is_ignored(monkeypatch, tmp_path):
     monkeypatch.setenv("TAIGI_PROVIDER_MODE", "mock")
     monkeypatch.setenv("TAIGI_EXTENSION_IDS", "not-an-extension-id")
     monkeypatch.setenv("TAIGI_REQUIRE_ALLOWED_ORIGIN", "true")
+    monkeypatch.setenv(
+        "TAIGI_QUOTA_DATABASE_PATH",
+        str(tmp_path / "quota.sqlite3"),
+    )
 
     app = create_app(WebSettings(allowed_web_origins=(WEB_ORIGIN,)))
     response = await request(
@@ -138,8 +188,10 @@ async def test_legacy_extension_environment_is_ignored(monkeypatch):
     assert response.json()["mode"] == "mock"
 
 
-async def test_async_job_poll_and_terminal_result_contract_is_preserved():
-    app = mock_app()
+async def test_async_job_poll_and_terminal_result_contract_is_preserved(
+    tmp_path,
+):
+    app = mock_app(tmp_path)
     headers = {"Origin": WEB_ORIGIN}
     created = await request(
         app,
@@ -167,6 +219,7 @@ async def test_async_job_poll_and_terminal_result_contract_is_preserved():
     body = terminal.json()
     assert body["status"] == "completed"
     assert body["result"]["mime_type"] == "audio/wav"
+    assert body["result"]["spoken_text"] == body["result"]["taigi_text"]
     assert body["result"]["taigi_text"]
     assert body["result"]["audio_base64"]
     assert body["result"]["provider"] == (
@@ -182,8 +235,153 @@ async def test_async_job_poll_and_terminal_result_contract_is_preserved():
     assert deleted.status_code == 204
 
 
-async def test_localhost_origin_is_allowed_but_unlisted_remote_origin_is_rejected():
-    app = mock_app()
+@pytest.mark.parametrize(
+    ("source_language", "target_language", "text", "provider", "has_taigi"),
+    [
+        (
+            "nan-Latn-TW",
+            "nan-TW",
+            "Kin-á-ji̍t thiⁿ-khì chin hó。",
+            "direct:nan-Latn-TW+mock:wav-synthesizer",
+            True,
+        ),
+        (
+            "zh-TW",
+            "zh-TW",
+            "今天天氣真好。",
+            "direct:zh-TW+mock:online-mandarin-backup",
+            False,
+        ),
+    ],
+)
+async def test_web_async_jobs_preserve_input_and_target_mode(
+    tmp_path,
+    source_language,
+    target_language,
+    text,
+    provider,
+    has_taigi,
+):
+    app = mock_app(tmp_path)
+    headers = {"Origin": WEB_ORIGIN}
+    created = await request(
+        app,
+        "POST",
+        "/v1/synthesis-jobs",
+        headers=headers,
+        json={
+            "text": text,
+            "source_language": source_language,
+            "target_language": target_language,
+            "rate": 1.0,
+        },
+    )
+
+    terminal = None
+    for _ in range(20):
+        response = await request(
+            app,
+            "GET",
+            f"/v1/synthesis-jobs/{created.json()['job_id']}",
+            headers=headers,
+        )
+        if response.json()["status"] != "pending":
+            terminal = response.json()
+            break
+        await asyncio.sleep(0)
+
+    assert terminal is not None
+    result = terminal["result"]
+    expected_spoken_text = (
+        "kin-á-ji̍t thinn-khì chin hó"
+        if source_language == "nan-Latn-TW"
+        else text
+    )
+    assert result["spoken_text"] == expected_spoken_text
+    assert result["provider"] == provider
+    assert bool(result["taigi_text"]) is has_taigi
+
+
+async def test_formal_pages_origin_is_allowed_exactly(tmp_path):
+    formal_origin = "https://yazelin.github.io"
+    upstream = Settings(
+        provider_mode="mock",
+        quota_database_path=str(tmp_path / "formal-origin-quota.sqlite3"),
+    )
+    app = create_app(
+        WebSettings(
+            allowed_web_origins=(formal_origin,),
+            allow_localhost_origins=False,
+            require_web_origin=True,
+        ),
+        upstream,
+    )
+
+    allowed = await request(
+        app,
+        "GET",
+        "/v1/access",
+        headers={"Origin": formal_origin},
+    )
+    lookalike = await request(
+        app,
+        "GET",
+        "/v1/access",
+        headers={"Origin": f"{formal_origin}.evil.example"},
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == formal_origin
+    assert lookalike.status_code == 403
+    assert "access-control-allow-origin" not in lookalike.headers
+
+
+async def test_web_wrapper_enforces_durable_open_access_quota(tmp_path):
+    upstream = Settings(
+        provider_mode="mock",
+        quota_database_path=str(tmp_path / "open-quota.sqlite3"),
+        daily_subject_job_limit=1,
+        daily_subject_character_limit=100,
+        daily_global_job_limit=1,
+        daily_global_character_limit=100,
+    )
+    app = create_app(
+        WebSettings(allowed_web_origins=(WEB_ORIGIN,)),
+        upstream,
+    )
+    headers = {"Origin": WEB_ORIGIN}
+
+    access = await request(app, "GET", "/v1/access", headers=headers)
+    first = await request(
+        app,
+        "POST",
+        "/v1/synthesis-jobs",
+        headers=headers,
+        json=REQUEST,
+    )
+    second = await request(
+        app,
+        "POST",
+        "/v1/synthesis-jobs",
+        headers=headers,
+        json=REQUEST,
+    )
+
+    assert access.status_code == 200
+    assert access.json()["authentication_required"] is False
+    assert access.json()["subject"] == "local-open-access"
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.headers["x-ratelimit-scope"] in {
+        "subject_jobs",
+        "global_jobs",
+    }
+
+
+async def test_localhost_origin_is_allowed_but_unlisted_remote_origin_is_rejected(
+    tmp_path,
+):
+    app = mock_app(tmp_path)
     local = await request(
         app,
         "GET",
@@ -260,9 +458,9 @@ async def test_bearer_authorization_reaches_the_upstream_access_control(
     assert accepted.json()["subject"] == "tester"
 
 
-async def test_direct_synthesis_endpoint_is_not_exposed():
+async def test_direct_synthesis_endpoint_is_not_exposed(tmp_path):
     response = await request(
-        mock_app(),
+        mock_app(tmp_path),
         "POST",
         "/v1/synthesize",
         headers={"Origin": WEB_ORIGIN},

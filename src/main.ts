@@ -10,26 +10,36 @@ import {
 import { AudioQueuePlayer } from "./lib/audio-player";
 import {
   createBackendClient,
-  SESSION_TOKEN_KEY,
+  sessionTokenKeyForEndpoint,
   type BackendClient,
   type BackendHealth,
+  type SpeechSourceLanguage,
+  type SpeechTargetLanguage,
   type SynthesisResult,
   validateEndpoint
 } from "./lib/backend";
 import { DeviceSpeechEngine } from "./lib/device-speech";
 import { FileImportError, importDocument } from "./lib/file-import";
-import { countGraphemes, splitText, validateText } from "./lib/text";
+import { countGraphemes, splitText, validateRomanizedTaigiInput, validateText } from "./lib/text";
+import { resolveRemoteEndpoint, safeRemoteEndpoint } from "./lib/reader-config";
+import {
+  configureSavedPlaybackButton,
+  SavedAudioPlaybackController
+} from "./lib/saved-audio-playback";
 import {
   findMandarinVoices,
   findTaigiVoices,
-  loadVoices
+  loadVoices,
+  watchVoices
 } from "./lib/voices";
 
 type Language = "mandarin" | "taigi";
 type ConnectionMode = "device" | "local" | "saving";
+type TaigiInputMode = "translate" | "direct";
 
 interface ReadingConfig {
   language: Language;
+  taigiInputMode: TaigiInputMode | null;
   connection: ConnectionMode;
   chunks: string[];
   rate: number;
@@ -49,9 +59,10 @@ interface ReadingSession {
   backend: BackendClient | null;
 }
 
-interface PreparedTaigi {
+interface PreparedAudio {
   audio: Blob;
   provider: string;
+  spokenText: string;
   taigiText: string;
   cached: boolean;
 }
@@ -61,6 +72,10 @@ const MAX_BACKEND_SEGMENT = 280;
 const LOCAL_BACKEND_URL = "http://127.0.0.1:8765";
 const REMOTE_ENDPOINT_KEY = "awei-voice:remote-backend-url";
 const PROVIDER_MAP_KEY = "awei-voice:backend-provider-map";
+const DEFAULT_REMOTE_BACKEND_URL = resolveRemoteEndpoint(
+  null,
+  import.meta.env.VITE_TAIGI_BACKEND_URL
+);
 
 function element<T extends Element>(selector: string): T {
   const found = document.querySelector<T>(selector);
@@ -70,7 +85,10 @@ function element<T extends Element>(selector: string): T {
 
 function selectedValue<T extends string>(name: string): T {
   const input = document.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`);
-  if (!input) throw new Error(`請選擇${name === "language" ? "朗讀語言" : "連線方式"}。`);
+  const label = name === "language"
+    ? "朗讀語言"
+    : name === "taigiInputMode" ? "台語輸入方式" : "連線方式";
+  if (!input) throw new Error(`請選擇${label}。`);
   return input.value as T;
 }
 
@@ -142,14 +160,31 @@ function providerMap(): Record<string, string> {
   }
 }
 
-function rememberProvider(endpoint: string, provider: string): void {
+function providerRouteKey(
+  endpoint: string,
+  source: SpeechSourceLanguage,
+  target: SpeechTargetLanguage
+): string {
+  return `${endpoint}|${source}->${target}`;
+}
+
+function rememberProvider(
+  endpoint: string,
+  source: SpeechSourceLanguage,
+  target: SpeechTargetLanguage,
+  provider: string
+): void {
   const providers = providerMap();
-  providers[endpoint] = provider;
+  providers[providerRouteKey(endpoint, source, target)] = provider;
   saveLocalStorageValue(PROVIDER_MAP_KEY, JSON.stringify(providers));
 }
 
-function rememberedProvider(endpoint: string): string | null {
-  return providerMap()[endpoint] ?? null;
+function rememberedProvider(
+  endpoint: string,
+  source: SpeechSourceLanguage,
+  target: SpeechTargetLanguage
+): string | null {
+  return providerMap()[providerRouteKey(endpoint, source, target)] ?? null;
 }
 
 const form = element<HTMLFormElement>("#reader-form");
@@ -158,7 +193,12 @@ const textCount = element<HTMLElement>("#text-count");
 const fileInput = element<HTMLInputElement>("#document-file");
 const fileStatus = element<HTMLElement>("#file-status");
 const clearTextButton = element<HTMLButtonElement>("#clear-text");
+const taigiInputSettings = element<HTMLElement>("#taigi-input-settings");
+const taigiInputHelp = element<HTMLElement>("#taigi-input-help");
 const voiceSelect = element<HTMLSelectElement>("#voice-select");
+const deviceVoiceTools = element<HTMLElement>("#device-voice-tools");
+const refreshVoicesButton = element<HTMLButtonElement>("#refresh-voices");
+const voiceStatus = element<HTMLElement>("#voice-status");
 const serviceSettings = element<HTMLElement>("#service-settings");
 const backendUrlInput = element<HTMLInputElement>("#backend-url");
 const backendTokenInput = element<HTMLInputElement>("#backend-token");
@@ -173,15 +213,19 @@ const formError = element<HTMLElement>("#form-error");
 const playerPanel = element<HTMLElement>("#player-panel");
 const playerProgress = element<HTMLElement>("#player-progress");
 const playerStatus = element<HTMLElement>("#player-status");
+const currentChunkLabel = element<HTMLElement>("#current-chunk-label");
 const currentChunk = element<HTMLElement>("#current-chunk");
 const readingProgress = element<HTMLProgressElement>("#reading-progress");
 const previousButton = element<HTMLButtonElement>("#previous-chunk");
 const pauseButton = element<HTMLButtonElement>("#pause-reading");
 const nextButton = element<HTMLButtonElement>("#next-chunk");
 const stopButton = element<HTMLButtonElement>("#stop-reading");
+const taigiResult = element<HTMLElement>("#taigi-result");
+const taigiResultHeading = element<HTMLElement>("#taigi-result-heading");
 const providerName = element<HTMLElement>("#provider-name");
 const taigiText = element<HTMLElement>("#taigi-text");
 const librarySummary = element<HTMLElement>("#library-summary");
+const libraryPlaybackStatus = element<HTMLElement>("#library-playback-status");
 const savedAudioList = element<HTMLUListElement>("#saved-audio-list");
 const clearLibraryButton = element<HTMLButtonElement>("#clear-library");
 const networkStatus = element<HTMLElement>("#network-status");
@@ -189,17 +233,32 @@ const updateToast = element<HTMLElement>("#update-toast");
 const applyUpdateButton = element<HTMLButtonElement>("#apply-update");
 
 let deviceVoices: SpeechSynthesisVoice[] = [];
+let tokenEndpoint: string | null = null;
 let sessionSequence = 0;
 let activeSession: ReadingSession | null = null;
 let reusableConfig: ReadingConfig | null = null;
+let savedAudioEntries: AudioCacheMetadata[] = [];
 
 const deviceSpeech = new DeviceSpeechEngine();
 const audioPlayer = new AudioQueuePlayer({
   onChange(snapshot) {
-    if (!activeSession || activeSession.config.language !== "taigi") return;
+    if (!activeSession) return;
     if (snapshot.state === "error" && snapshot.error) {
       setPlayerStatus(snapshot.error);
     }
+  }
+});
+const libraryAudioPlayer = new AudioQueuePlayer();
+const savedAudioPlayback = new SavedAudioPlaybackController({
+  player: libraryAudioPlayer,
+  beforePlay: () => stopReading(false),
+  onChange(snapshot) {
+    setFieldStatus(
+      libraryPlaybackStatus,
+      snapshot.message,
+      snapshot.state === "error" ? "error" : snapshot.state === "playing" ? "success" : "neutral"
+    );
+    renderSavedAudio(savedAudioEntries);
   }
 });
 
@@ -257,6 +316,47 @@ function currentConnection(): ConnectionMode {
   return selectedValue<ConnectionMode>("connection");
 }
 
+function currentTaigiInputMode(): TaigiInputMode {
+  return selectedValue<TaigiInputMode>("taigiInputMode");
+}
+
+function preferredRemoteEndpoint(): string {
+  return resolveRemoteEndpoint(
+    localStorageValue(REMOTE_ENDPOINT_KEY),
+    import.meta.env.VITE_TAIGI_BACKEND_URL
+  );
+}
+
+function syncBackendTokenForEndpoint(endpointValue = backendUrlInput.value): void {
+  let endpoint: string | null = null;
+  try {
+    endpoint = validateEndpoint(endpointValue);
+  } catch {
+    // An incomplete/invalid URL must never retain another endpoint's token.
+  }
+  if (endpoint === tokenEndpoint) return;
+  tokenEndpoint = endpoint;
+  backendTokenInput.value = endpoint
+    ? sessionStorageValue(sessionTokenKeyForEndpoint(endpoint)) ?? ""
+    : "";
+}
+
+function saveTokenForCurrentEndpoint(): void {
+  let endpoint: string;
+  try {
+    endpoint = validateEndpoint(backendUrlInput.value);
+  } catch {
+    tokenEndpoint = null;
+    backendTokenInput.value = "";
+    return;
+  }
+  if (tokenEndpoint !== endpoint) syncBackendTokenForEndpoint(endpoint);
+  saveSessionStorageValue(
+    sessionTokenKeyForEndpoint(endpoint),
+    backendTokenInput.value.trim()
+  );
+}
+
 function chosenVoice(): SpeechSynthesisVoice | null {
   return deviceVoices.find((voice) => voice.voiceURI === voiceSelect.value) ?? null;
 }
@@ -274,10 +374,12 @@ function renderVoiceChoices(): void {
     : findTaigiVoices(deviceVoices);
 
   voiceSelect.replaceChildren();
-  if (language === "taigi" && connection !== "device") {
+  if (connection !== "device") {
     const option = document.createElement("option");
     option.value = "backend";
-    option.textContent = "由台語語音服務決定";
+    option.textContent = language === "taigi"
+      ? "由台語語音服務決定"
+      : "線上台灣國語：曉辰（zh-TW）";
     voiceSelect.append(option);
     voiceSelect.disabled = true;
     return;
@@ -302,39 +404,90 @@ function renderVoiceChoices(): void {
   }
 }
 
+function announceVoiceAvailability(prefix = ""): void {
+  if (currentConnection() !== "device") {
+    setFieldStatus(voiceStatus, "");
+    return;
+  }
+  const available = currentLanguage() === "mandarin"
+    ? findMandarinVoices(deviceVoices)
+    : findTaigiVoices(deviceVoices);
+  if (available.length > 0) {
+    setFieldStatus(
+      voiceStatus,
+      `${prefix}找到 ${available.length.toLocaleString("zh-TW")} 個可用聲音。`,
+      "success"
+    );
+  } else {
+    setFieldStatus(
+      voiceStatus,
+      currentLanguage() === "mandarin"
+        ? `${prefix}仍找不到系統的 zh-TW 聲音，已可改選「省流量服務」線上朗讀。`
+        : `${prefix}仍找不到真正的台語裝置聲音，可改用台語語音服務。`,
+      "error"
+    );
+  }
+}
+
 function syncModeCapabilities(): void {
   const language = currentLanguage();
+  const taigiInputMode = currentTaigiInputMode();
   const connectionInputs = [
     ...document.querySelectorAll<HTMLInputElement>('input[name="connection"]')
   ];
+  const device = connectionInputs.find(({ value }) => value === "device");
+  const local = connectionInputs.find(({ value }) => value === "local");
+  const saving = connectionInputs.find(({ value }) => value === "saving");
+
+  taigiInputSettings.hidden = language !== "taigi";
 
   if (language === "mandarin") {
-    const device = connectionInputs.find(({ value }) => value === "device");
-    if (device) device.checked = true;
-    for (const input of connectionInputs) input.disabled = input.value !== "device";
+    for (const input of connectionInputs) input.disabled = input.value === "local";
+    if (local?.checked && device) device.checked = true;
   } else {
     for (const input of connectionInputs) input.disabled = false;
+    if (taigiInputMode === "translate") {
+      if (device) device.disabled = true;
+      if (device?.checked && saving) saving.checked = true;
+      taigiInputHelp.textContent =
+        "「華語翻成台語」一定要使用台語語音服務；裝置語音不會幫你翻譯。";
+      sourceText.placeholder = "例如：今天天氣很好，我們一起去公園散步。";
+    } else {
+      taigiInputHelp.textContent =
+        "這段文字不會再翻譯；只接受模型字表內的調符 POJ，不支援漢字或數字調號。";
+      sourceText.placeholder = "例如：Kin-á-ji̍t thiⁿ-khì chin hó。";
+    }
+  }
+
+  if (language === "mandarin") {
+    sourceText.placeholder = "例如：今天天氣很好，我們一起去公園散步。";
   }
 
   const connection = currentConnection();
-  const showService = language === "taigi" && connection !== "device";
+  const showService = connection !== "device";
   serviceSettings.hidden = !showService;
   saveAudioRow.hidden = !showService;
-  localLicenseHelp.hidden = !(showService && connection === "local");
+  deviceVoiceTools.hidden = connection !== "device";
+  localLicenseHelp.hidden = !(language === "taigi" && connection === "local");
 
   if (showService) {
     if (connection === "local") {
       backendUrlInput.value = LOCAL_BACKEND_URL;
       backendHelp.textContent = "本機服務不會把文字送出這台電腦；瀏覽器詢問「本機網路存取」時需選擇允許。";
-    } else if (backendUrlInput.value === LOCAL_BACKEND_URL || !backendUrlInput.value) {
-      backendUrlInput.value = localStorageValue(REMOTE_ENDPOINT_KEY) ?? "";
-      backendHelp.textContent = "遠端服務只接受 HTTPS；文字會送到你填寫的服務。";
+    } else {
+      if (backendUrlInput.value === LOCAL_BACKEND_URL || !backendUrlInput.value) {
+        backendUrlInput.value = preferredRemoteEndpoint();
+      }
+      backendHelp.textContent = language === "mandarin"
+        ? `推薦服務已填入 ${DEFAULT_REMOTE_BACKEND_URL}；線上台灣國語需要網路，採非官方 edge-tts，無可用率保證。`
+        : `推薦服務已填入 ${DEFAULT_REMOTE_BACKEND_URL}；遠端只接受 HTTPS，按下朗讀後才會逐段傳送文字。`;
     }
-    backendTokenInput.value = sessionStorageValue(SESSION_TOKEN_KEY) ?? "";
+    syncBackendTokenForEndpoint();
   }
 
   setFieldStatus(backendStatus, "");
   renderVoiceChoices();
+  announceVoiceAvailability();
 }
 
 function updateNetworkStatus(): void {
@@ -343,37 +496,89 @@ function updateNetworkStatus(): void {
   networkStatus.textContent = online ? "目前有網路" : "目前離線";
 }
 
-async function refreshVoices(): Promise<void> {
-  deviceVoices = await loadVoices();
-  renderVoiceChoices();
+async function refreshVoices(announceStart = false): Promise<void> {
+  refreshVoicesButton.disabled = true;
+  if (announceStart) setFieldStatus(voiceStatus, "正在重新偵測裝置聲音…");
+  try {
+    deviceVoices = await loadVoices();
+    if (
+      currentLanguage() === "mandarin" &&
+      currentConnection() === "device" &&
+      findMandarinVoices(deviceVoices).length === 0
+    ) {
+      const saving = document.querySelector<HTMLInputElement>(
+        'input[name="connection"][value="saving"]'
+      );
+      if (saving) {
+        saving.checked = true;
+        syncModeCapabilities();
+        setFieldStatus(
+          backendStatus,
+          "找不到裝置的 zh-TW 聲音，已改選線上台灣國語；邀請碼可留空。"
+        );
+        return;
+      }
+    }
+    renderVoiceChoices();
+    announceVoiceAvailability(announceStart ? "重新偵測完成；" : "");
+  } finally {
+    refreshVoicesButton.disabled = false;
+  }
 }
 
 function clientFor(url: string, token: string): BackendClient {
+  const normalizedUrl = validateEndpoint(url);
   const normalizedToken = token.trim();
-  saveSessionStorageValue(SESSION_TOKEN_KEY, normalizedToken);
+  const sessionTokenKey = sessionTokenKeyForEndpoint(normalizedUrl);
+  saveSessionStorageValue(sessionTokenKey, normalizedToken);
   const client = createBackendClient({
-    baseUrl: url,
+    baseUrl: normalizedUrl,
     token: normalizedToken || undefined,
+    sessionTokenKey,
     allowTestProvider: import.meta.env.DEV
   });
   return client;
 }
 
 function healthLabel(health: BackendHealth): string {
+  if (currentLanguage() === "mandarin") {
+    return health.isTestProvider
+      ? `已連線，但目前是測試音訊：${health.provider}`
+      : `服務已連線並宣告支援線上台灣國語，尚未試播（需網路、非官方、無可用率保證）：${health.mandarinSynthesizer ?? "未標示"}`;
+  }
+  const direct = health.sourceLanguages.includes("nan-Latn-TW")
+    ? "，支援調符 POJ 直讀"
+    : "";
   return health.isTestProvider
     ? `已連線，但目前是測試音訊：${health.provider}`
-    : `台語服務可用：${health.provider}`;
+    : `服務已連線並宣告支援台語${direct}，尚未試播：${health.provider}`;
 }
 
 async function checkBackend(): Promise<BackendHealth> {
-  const normalizedUrl = validateEndpoint(backendUrlInput.value);
-  backendUrlInput.value = normalizedUrl;
   checkBackendButton.disabled = true;
   setFieldStatus(backendStatus, "正在檢查，尚未傳送朗讀文字…");
   try {
+    const normalizedUrl = validateEndpoint(backendUrlInput.value);
+    if (currentConnection() === "saving" && !safeRemoteEndpoint(normalizedUrl)) {
+      throw new Error("省流量服務必須使用 HTTPS 網址；本機 HTTP 請改選「本機服務」。");
+    }
+    backendUrlInput.value = normalizedUrl;
+    syncBackendTokenForEndpoint(normalizedUrl);
     const client = clientFor(normalizedUrl, backendTokenInput.value);
     const health = await client.refreshHealth();
-    rememberProvider(normalizedUrl, health.provider);
+    if (currentLanguage() === "mandarin" && !health.targetLanguages.includes("zh-TW")) {
+      throw new Error("服務已連線，但尚未支援線上台灣國語朗讀。");
+    }
+    if (
+      currentLanguage() === "taigi" &&
+      currentTaigiInputMode() === "direct" &&
+      !health.sourceLanguages.includes("nan-Latn-TW")
+    ) {
+      throw new Error("服務已連線，但尚未支援調符 POJ 直接朗讀。請改選「華語翻成台語」。");
+    }
+    if (currentLanguage() === "taigi" && currentTaigiInputMode() === "translate") {
+      rememberProvider(normalizedUrl, "zh-TW", "nan-TW", health.provider);
+    }
     if (currentConnection() === "saving") {
       saveLocalStorageValue(REMOTE_ENDPOINT_KEY, normalizedUrl);
     }
@@ -399,14 +604,24 @@ function collectConfig(): ReadingConfig {
   if (!validation.ok) throw new Error(validation.message);
 
   const language = currentLanguage();
+  const taigiInputMode = language === "taigi" ? currentTaigiInputMode() : null;
+  let preparedText = validation.text;
+  if (taigiInputMode === "direct") {
+    const directInput = validateRomanizedTaigiInput(validation.text);
+    if (!directInput.ok) throw new Error(directInput.message);
+    preparedText = directInput.text;
+  }
   const connection = currentConnection();
-  const useBackend = language === "taigi" && connection !== "device";
+  if (language === "taigi" && taigiInputMode === "translate" && connection === "device") {
+    throw new Error("華語翻台語需要台語語音服務，不能使用裝置語音。");
+  }
+  const useBackend = connection !== "device";
   const maxLength = useBackend ? MAX_BACKEND_SEGMENT : MAX_DEVICE_SEGMENT;
   const voice = useBackend ? null : chosenVoice();
   if (!useBackend && !voice) {
     throw new Error(
       language === "mandarin"
-        ? "這台裝置找不到 zh-TW 聲音。請先在系統安裝台灣中文語音。"
+        ? "這台裝置找不到 zh-TW 聲音。請改選「省流量服務」，或先安裝台灣中文語音。"
         : "這台裝置找不到真正的台語聲音。請改選本機服務或省流量服務。"
     );
   }
@@ -414,20 +629,25 @@ function collectConfig(): ReadingConfig {
   let backendUrl: string | null = null;
   if (useBackend) {
     backendUrl = validateEndpoint(backendUrlInput.value);
+    if (connection === "saving" && !safeRemoteEndpoint(backendUrl)) {
+      throw new Error("省流量服務必須使用 HTTPS 網址；本機 HTTP 請改選「本機服務」。");
+    }
     backendUrlInput.value = backendUrl;
+    syncBackendTokenForEndpoint(backendUrl);
     if (connection === "saving") saveLocalStorageValue(REMOTE_ENDPOINT_KEY, backendUrl);
   }
 
-  sourceText.value = validation.text;
+  sourceText.value = preparedText;
   updateTextCount();
   return {
     language,
+    taigiInputMode,
     connection,
-    chunks: splitText(validation.text, maxLength),
+    chunks: splitText(preparedText, maxLength),
     rate: rateValue(),
     voice,
     backendUrl,
-    backendToken: backendTokenInput.value,
+    backendToken: backendTokenInput.value.trim(),
     saveAudio: useBackend && saveAudioInput.checked
   };
 }
@@ -437,6 +657,19 @@ function updatePlayerPosition(session: ReadingSession): void {
   const total = session.config.chunks.length;
   playerProgress.textContent = `第 ${number.toLocaleString("zh-TW")} 段，共 ${total.toLocaleString("zh-TW")} 段`;
   currentChunk.textContent = session.config.chunks[session.index] ?? "";
+  currentChunkLabel.textContent = session.config.language === "taigi"
+    ? session.config.taigiInputMode === "translate"
+      ? "這一段的華語原文"
+      : "這一段輸入的調符 POJ"
+    : "這一段的原文";
+  taigiResult.hidden = session.config.language !== "taigi";
+  if (session.config.language === "taigi") {
+    taigiResultHeading.textContent = session.config.taigiInputMode === "translate"
+      ? "華語翻成的台語稿（POJ）"
+      : "直接朗讀的調符 POJ";
+    taigiText.textContent = "正在準備這一段…";
+    providerName.textContent = "尚未取得";
+  }
   readingProgress.max = total;
   readingProgress.value = session.index;
   readingProgress.textContent = `${Math.round((session.index / total) * 100)}%`;
@@ -465,17 +698,19 @@ async function waitUntilResumed(session: ReadingSession): Promise<void> {
   });
 }
 
-async function cachedTaigi(
+async function cachedAudio(
   config: ReadingConfig,
   text: string
 ): Promise<AudioCacheEntry | null> {
   if (!audioCache || !config.backendUrl) return null;
-  const provider = rememberedProvider(config.backendUrl);
+  const source = sourceLanguage(config);
+  const target = targetLanguage(config);
+  const provider = rememberedProvider(config.backendUrl, source, target);
   if (!provider) return null;
   const entries = await audioCache.list();
   const match = entries.find((entry) =>
-    entry.language.toLowerCase() === "nan-TW".toLowerCase() &&
-    entry.voice === config.backendUrl &&
+    entry.language.toLowerCase() === target.toLowerCase() &&
+    entry.voice === cacheVoice(config) &&
     entry.rate === config.rate &&
     entry.provider === provider &&
     entry.text === text
@@ -483,43 +718,65 @@ async function cachedTaigi(
   return match ? audioCache.get(match.key) : null;
 }
 
-async function prepareTaigi(
+function cacheVoice(config: ReadingConfig): string {
+  if (!config.backendUrl) return "";
+  return `${config.backendUrl}#route=${sourceLanguage(config)}->${targetLanguage(config)}`;
+}
+
+function sourceLanguage(config: ReadingConfig): SpeechSourceLanguage {
+  return config.taigiInputMode === "direct" ? "nan-Latn-TW" : "zh-TW";
+}
+
+function targetLanguage(config: ReadingConfig): SpeechTargetLanguage {
+  return config.language === "taigi" ? "nan-TW" : "zh-TW";
+}
+
+async function prepareAudio(
   session: ReadingSession,
   index: number
-): Promise<PreparedTaigi> {
+): Promise<PreparedAudio> {
   const text = session.config.chunks[index];
   if (!text || !session.config.backendUrl || !session.backend) {
-    throw new Error("台語服務設定不完整。");
+    throw new Error("語音服務設定不完整。");
   }
 
-  const cached = await cachedTaigi(session.config, text);
+  const cached = await cachedAudio(session.config, text);
   if (cached) {
     return {
       audio: cached.audio,
       provider: `${cached.provider}（已保存）`,
-      taigiText: cached.taigiText ?? "這筆舊快取沒有保存台語稿。",
+      spokenText: cached.taigiText ?? text,
+      taigiText: cached.taigiText ?? "",
       cached: true
     };
   }
 
-  setPlayerStatus(`正在產生第 ${index + 1} 段台語…`);
+  setPlayerStatus(
+    session.config.language === "taigi"
+      ? `正在產生第 ${index + 1} 段台語…`
+      : `正在產生第 ${index + 1} 段線上台灣國語…`
+  );
+  const source = sourceLanguage(session.config);
+  const target = targetLanguage(session.config);
   const result: SynthesisResult = await session.backend.synthesize({
     text,
+    sourceLanguage: source,
+    targetLanguage: target,
     rate: session.config.rate,
     signal: session.abortController.signal
   });
-  rememberProvider(session.config.backendUrl, result.provider);
+  rememberProvider(session.config.backendUrl, source, target, result.provider);
 
   if (session.config.saveAudio && audioCache) {
     try {
       const saved = await audioCache.put({
-        language: "nan-TW",
-        voice: session.config.backendUrl,
+        language: target,
+        voice: cacheVoice(session.config),
         rate: session.config.rate,
         provider: result.provider,
         text,
         audio: result.audio,
-        taigiText: result.taigiText
+        ...(session.config.language === "taigi" ? { taigiText: result.taigiText } : {})
       });
       if (saved.saved) {
         await updateLibrarySummary();
@@ -537,19 +794,32 @@ async function prepareTaigi(
   return {
     audio: result.audio,
     provider: result.provider,
+    spokenText: result.spokenText,
     taigiText: result.taigiText,
     cached: false
   };
 }
 
-async function playPreparedTaigi(
+async function playPreparedAudio(
   session: ReadingSession,
-  prepared: PreparedTaigi
+  prepared: PreparedAudio
 ): Promise<void> {
-  providerName.textContent = prepared.provider;
-  taigiText.textContent = prepared.taigiText;
+  if (session.config.language === "taigi") {
+    taigiResult.hidden = false;
+    taigiResultHeading.textContent = session.config.taigiInputMode === "translate"
+      ? "華語翻成的台語稿（POJ）"
+      : "直接朗讀的調符 POJ";
+    providerName.textContent = prepared.provider;
+    taigiText.textContent = prepared.taigiText;
+  } else {
+    taigiResult.hidden = true;
+  }
   await waitUntilResumed(session);
-  setPlayerStatus(prepared.cached ? "播放已保存的台語語音" : "正在播放台語");
+  setPlayerStatus(
+    session.config.language === "taigi"
+      ? prepared.cached ? "播放已保存的台語語音" : "正在播放台語"
+      : prepared.cached ? "播放已保存的台灣國語" : "正在播放線上台灣國語"
+  );
   await audioPlayer.play(prepared.audio);
   const outcome = await audioPlayer.whenFinished();
   if (outcome.reason === "error") throw outcome.error ?? new Error("音訊無法播放。");
@@ -560,9 +830,13 @@ async function playDeviceChunk(session: ReadingSession, text: string): Promise<v
   const voice = session.config.voice;
   if (!voice) throw new Error("裝置聲音設定遺失。");
   providerName.textContent = `裝置聲音：${voice.name}（${voice.lang}）`;
-  taigiText.textContent = session.config.language === "taigi"
-    ? "裝置直接朗讀原文，沒有另做國語轉台語。"
-    : "台灣國語模式直接朗讀原文。";
+  if (session.config.language === "taigi") {
+    taigiResult.hidden = false;
+    taigiResultHeading.textContent = "直接朗讀的調符 POJ";
+    taigiText.textContent = text;
+  } else {
+    taigiResult.hidden = true;
+  }
   await waitUntilResumed(session);
   setPlayerStatus(
     session.config.language === "taigi" ? "正在播放裝置台語" : "正在播放台灣國語"
@@ -593,7 +867,7 @@ async function runReading(config: ReadingConfig, startIndex = 0): Promise<void> 
   startButton.disabled = true;
   clearFormError();
 
-  const pending = new Map<number, Promise<PreparedTaigi>>();
+  const pending = new Map<number, Promise<PreparedAudio>>();
   try {
     for (; session.index < config.chunks.length; session.index += 1) {
       if (activeSession !== session || session.abortController.signal.aborted) {
@@ -603,19 +877,19 @@ async function runReading(config: ReadingConfig, startIndex = 0): Promise<void> 
       const text = config.chunks[session.index];
       if (!text) continue;
 
-      if (config.language === "taigi" && config.connection !== "device") {
-        const prepared = await (pending.get(session.index) ?? prepareTaigi(session, session.index));
+      if (config.connection !== "device") {
+        const prepared = await (pending.get(session.index) ?? prepareAudio(session, session.index));
         pending.delete(session.index);
 
         const nextIndex = session.index + 1;
         if (nextIndex < config.chunks.length) {
-          const next = prepareTaigi(session, nextIndex);
+          const next = prepareAudio(session, nextIndex);
           // Attach a handler now so STOP during playback cannot create an
           // unhandled rejection; awaiting the original promise still reports it.
           void next.catch(() => undefined);
           pending.set(nextIndex, next);
         }
-        await playPreparedTaigi(session, prepared);
+        await playPreparedAudio(session, prepared);
       } else {
         await playDeviceChunk(session, text);
       }
@@ -689,6 +963,7 @@ async function togglePause(): Promise<void> {
 
 async function updateLibrarySummary(): Promise<void> {
   if (!audioCache) {
+    savedAudioEntries = [];
     librarySummary.textContent = "這個瀏覽器無法保存語音。";
     savedAudioList.hidden = true;
     savedAudioList.replaceChildren();
@@ -698,6 +973,7 @@ async function updateLibrarySummary(): Promise<void> {
   try {
     librarySummary.removeAttribute("data-kind");
     const entries = await audioCache.list();
+    savedAudioEntries = entries;
     const bytes = entries.reduce((total, entry) => total + entry.bytes, 0);
     librarySummary.textContent = entries.length === 0
       ? "尚未保存語音。"
@@ -705,6 +981,7 @@ async function updateLibrarySummary(): Promise<void> {
     clearLibraryButton.disabled = entries.length === 0;
     renderSavedAudio(entries);
   } catch {
+    savedAudioEntries = [];
     setLibraryWarning("目前無法讀取保存的語音。");
     savedAudioList.hidden = true;
     savedAudioList.replaceChildren();
@@ -738,11 +1015,39 @@ function renderSavedAudio(entries: AudioCacheMetadata[]): void {
     title.textContent = savedAudioLabel(entry);
     const details = document.createElement("p");
     details.className = "saved-audio-meta";
-    details.textContent = `${entry.provider}・${entry.rate}×・${formatBytes(entry.bytes)}`;
+    details.textContent = `${entry.language}・${entry.provider}・${entry.rate}×・${formatBytes(entry.bytes)}`;
     copy.append(title, details);
 
     const actions = document.createElement("div");
     actions.className = "saved-audio-actions";
+    const playback = document.createElement("button");
+    const playbackSnapshot = savedAudioPlayback.snapshot;
+    const isCurrentPlayback = configureSavedPlaybackButton(
+      playback,
+      playbackSnapshot,
+      entry.key,
+      position
+    );
+    playback.className = isCurrentPlayback
+      ? "button button-danger library-action"
+      : "button button-primary library-action";
+    playback.addEventListener("click", () => {
+      if (!audioCache) return;
+      if (
+        savedAudioPlayback.snapshot.key === entry.key &&
+        (savedAudioPlayback.snapshot.state === "loading" ||
+          savedAudioPlayback.snapshot.state === "playing")
+      ) {
+        savedAudioPlayback.stop();
+        return;
+      }
+      void savedAudioPlayback.play(entry.key, async () => {
+        const found = await audioCache?.get(entry.key) ?? null;
+        if (!found) await updateLibrarySummary();
+        return found;
+      });
+    });
+
     const download = document.createElement("button");
     download.type = "button";
     download.className = "button button-secondary library-action";
@@ -760,7 +1065,7 @@ function renderSavedAudio(entries: AudioCacheMetadata[]): void {
         const url = URL.createObjectURL(found.audio);
         const anchor = document.createElement("a");
         anchor.href = url;
-        anchor.download = `awei-taigi-${position + 1}.${audioExtension(found.mimeType)}`;
+        anchor.download = `awei-voice-${position + 1}.${audioExtension(found.mimeType)}`;
         anchor.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
       } catch (error) {
@@ -776,7 +1081,8 @@ function renderSavedAudio(entries: AudioCacheMetadata[]): void {
     remove.textContent = "刪除";
     remove.setAttribute("aria-label", `刪除第 ${position + 1} 段已保存語音`);
     remove.addEventListener("click", async () => {
-      if (!audioCache || !window.confirm("確定要刪除這一段已保存的台語語音嗎？")) return;
+      if (!audioCache || !window.confirm("確定要刪除這一段已保存的語音嗎？")) return;
+      if (savedAudioPlayback.snapshot.key === entry.key) savedAudioPlayback.stop();
       remove.disabled = true;
       try {
         await audioCache.delete(entry.key);
@@ -786,7 +1092,7 @@ function renderSavedAudio(entries: AudioCacheMetadata[]): void {
         remove.disabled = false;
       }
     });
-    actions.append(download, remove);
+    actions.append(playback, download, remove);
     item.append(copy, actions);
     savedAudioList.append(item);
   });
@@ -829,9 +1135,30 @@ fileInput.addEventListener("change", async () => {
 for (const input of document.querySelectorAll<HTMLInputElement>('input[name="language"]')) {
   input.addEventListener("change", syncModeCapabilities);
 }
+for (const input of document.querySelectorAll<HTMLInputElement>('input[name="taigiInputMode"]')) {
+  input.addEventListener("change", syncModeCapabilities);
+}
 for (const input of document.querySelectorAll<HTMLInputElement>('input[name="connection"]')) {
   input.addEventListener("change", syncModeCapabilities);
 }
+
+backendTokenInput.addEventListener("input", () => {
+  saveTokenForCurrentEndpoint();
+});
+
+backendUrlInput.addEventListener("input", () => {
+  syncBackendTokenForEndpoint();
+});
+
+refreshVoicesButton.addEventListener("click", () => {
+  void refreshVoices(true);
+});
+
+const stopWatchingVoices = watchVoices((voices) => {
+  deviceVoices = voices;
+  renderVoiceChoices();
+  announceVoiceAvailability("裝置聲音清單已更新；");
+});
 
 checkBackendButton.addEventListener("click", () => {
   void checkBackend().catch(() => undefined);
@@ -839,9 +1166,15 @@ checkBackendButton.addEventListener("click", () => {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (
+    savedAudioPlayback.snapshot.state === "loading" ||
+    savedAudioPlayback.snapshot.state === "playing"
+  ) {
+    savedAudioPlayback.stop("已停止保存語音，開始新的朗讀");
+  }
   try {
     const config = collectConfig();
-    const needsAudioUnlock = config.language === "taigi" && config.connection !== "device";
+    const needsAudioUnlock = config.connection !== "device";
     if (!needsAudioUnlock) {
       void runReading(config);
       return;
@@ -881,7 +1214,8 @@ nextButton.addEventListener("click", () => {
 });
 
 clearLibraryButton.addEventListener("click", async () => {
-  if (!audioCache || !window.confirm("確定要刪除這台裝置保存的全部台語語音嗎？")) return;
+  if (!audioCache || !window.confirm("確定要刪除這台裝置保存的全部語音嗎？")) return;
+  savedAudioPlayback.stop();
   clearLibraryButton.disabled = true;
   await audioCache.clear();
   await updateLibrarySummary();
@@ -893,7 +1227,9 @@ window.addEventListener("beforeunload", () => {
   activeSession?.abortController.abort();
   deviceSpeech.stop();
   audioPlayer.stop();
+  savedAudioPlayback.stop("");
   audioCache?.close();
+  stopWatchingVoices();
 });
 
 let updateServiceWorker: ((reloadPage?: boolean) => Promise<void>) | undefined;

@@ -1,43 +1,40 @@
-# 台語後端：本機與遠端部署
+# 語音後端：上線服務與自架指南
 
-本專案的網頁後端不是重新發明 TTS。它以完整 commit
-`967d7370fb5f3b22cc4492c5ee5753fba3ae2904` 安裝已驗證的
-[`taigi-news-reader`](https://github.com/yazelin/taigi-news-reader) backend，
-保留原本的非同步 synthesis job、Bearer token、quota、Ollama translator、
-MMS 與 remote-provider contract；外層只改成適合一般網頁的 exact-origin
-閘門與 CORS。網頁不需要、也不應送 `X-Taigi-Extension-Id`。
+推薦的線上 endpoint 已部署在：
 
-## 能力邊界
+```text
+https://ching-tech.ddns.net/awei-voice
+```
 
-- `GET /health` 是不下載模型的輕量資訊檢查，只表示 process 已啟動並列出
-  mode／translator／synthesizer；它不保證 Ollama 已有模型，也不保證 MMS
-  權重已下載。
-- 真實本機路徑是「繁中 → Ollama/Qwen 實驗性台語翻譯 →
-  `facebook/mms-tts-nan` 實驗性 Min Nan 語音」。它不會失敗後改用國語。
-- MMS checkpoint 是 **CC BY-NC 4.0**，不是本 repo 的 MIT 資產，不可直接
-  當成未設限商用服務。它尚未通過 R6 母語試聽，不保證自然台灣腔。
-- Ollama 產出的台語稿即使通過 POJ 字元白名單，也仍須台語母語者驗收語意、
-  用詞與發音，通過前不可宣稱「正宗」。
-- Python 套件、Ollama/Qwen 與 MMS 權重都需要第一次連網下載。下載完成並保留
-  cache 後才可驗證離線合成；「剛 clone 完」不是離線可用。
+線上網頁預填此網址，匿名訪客可把邀請碼留空。匿名流量有服務端共用 quota 與 reverse proxy 限流；這是開放 Beta，不是無限額或 SLA 服務。
 
-完整授權說明見 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。
+後端以 `server/pyproject.toml` 中完整 commit SHA pin 住 [`taigi-news-reader`](https://github.com/yazelin/taigi-news-reader)，沿用非同步 synthesis job、provider contract、取消、quota 與資源上限；本 repo 的 wrapper 負責 exact web origin、公開匿名 quota 與網頁資料流。
+
+## Production 的實際 provider
+
+| Route | Production 處理 | 外部資料邊界 |
+|---|---|---|
+| `zh-TW → nan-TW` | Groq 把華語轉成 POJ；部署主機上的 `facebook/mms-tts-nan` 合成 WAV | Groq 收到華語分段 |
+| `nan-Latn-TW → nan-TW` | 不翻譯，部署主機上的 MMS 直接合成 WAV | POJ 留在本服務主機，不送 Groq |
+| `zh-TW → zh-TW` | 非官方 `edge-tts` 線上台灣國語備援，回 MP3 | 線上語音服務收到國語分段 |
+
+`nan-Latn-TW` 只接受 `facebook/mms-tts-nan` 字表可處理的 POJ。前後端會把大小寫、上標鼻音、常見撇號／連字號與標點正規化，但數字調號或字表外字母會在建立工作前／進入 TTS 前明確拒絕；**漢字台文不能宣告成 `nan-Latn-TW` 直接朗讀**。
+
+Groq 翻譯、POJ gate 和 MMS 成功都不等於語言品質已驗收。MMS 是 CC BY-NC 4.0 的實驗性 Min Nan 模型，不保證台灣腔；`edge-tts` 是非官方 client、需要網路且無可用率保證。
 
 ## API contract
 
-前端只使用 async contract：
+前端只使用 async contract；production base path 之後的路徑如下：
 
-1. `POST /v1/synthesis-jobs` 送出一個最長 280 字的前端分段；後端上限較大，
-   但不應用它來上傳全文。回應 HTTP 202、UUID4 `job_id` 與 `pending`。
-2. `GET /v1/synthesis-jobs/{job_id}` 短輪詢，回應 `pending`、`completed`
-   （含 `taigi_text`、base64 WAV、MIME type、provider）或 `failed`。
-3. 讀到 terminal response 後立即 `DELETE /v1/synthesis-jobs/{job_id}`；使用者
-   按停止時也 DELETE。Job 在單一 process 記憶體中，重啟即遺失，因此必須
-   維持一個 uvicorn worker／replica。
-4. `GET /v1/access` 驗證 token 並取得 quota。`POST /v1/synthesize` 在 wrapper
-   中固定關閉，避免網頁維持一個可能很久的 request。
+1. `GET /health`：回傳 provider 與 route 能力，不下載模型，也不保證一次真實合成一定成功。
+2. `GET /v1/access`：顯示是否要求驗證及目前 quota／reset 狀態。
+3. `POST /v1/synthesis-jobs`：建立工作，回 HTTP 202、UUID4 `job_id` 與 `pending`。
+4. `GET /v1/synthesis-jobs/{job_id}`：短輪詢 `pending`、`completed` 或 `failed`。
+5. `DELETE /v1/synthesis-jobs/{job_id}`：播放取得 terminal response 後清理，或在使用者停止時取消。
 
-建立工作的 JSON：
+Wrapper 固定關閉 `POST /v1/synthesize`，避免瀏覽器維持一個長時間 request。Job 留在單一 process 記憶體中，因此 deployment 維持一個 uvicorn worker／replica。
+
+### 華語翻台語
 
 ```json
 {
@@ -48,50 +45,77 @@ MMS 與 remote-provider contract；外層只改成適合一般網頁的 exact-or
 }
 ```
 
-啟用 access control 時，每個 `/v1/` actual request 都送
-`Authorization: Bearer <invite-token>`。Token 是服務的驗證憑證；Origin 只防止
-未列名網頁從瀏覽器呼叫，不能取代驗證，因為非瀏覽器 client 可自行偽造 Origin。
+成功 result 包含 `spoken_text`、`taigi_text`（POJ）、base64 WAV、`mime_type` 與 `provider`。
+
+### POJ 直接朗讀
+
+```json
+{
+  "text": "Kin-á-ji̍t thiⁿ-khì chin hó。",
+  "source_language": "nan-Latn-TW",
+  "target_language": "nan-TW",
+  "rate": 1.0
+}
+```
+
+此 route 的 provider 必須是 `direct:nan-Latn-TW+<synthesizer>`，不能把 translator 寫進 provider，也不應呼叫 Groq。
+
+### 線上台灣國語
+
+```json
+{
+  "text": "今天天氣真好。",
+  "source_language": "zh-TW",
+  "target_language": "zh-TW",
+  "rate": 1.0
+}
+```
+
+Health 必須把該 capability 標為 `online-mandarin-backup`、`network_required: true`、`unofficial: true`、`sla_guaranteed: false`。成功 result 的 `taigi_text` 為空，`spoken_text` 為國語原文，音訊通常是 MP3。
+
+## 匿名 quota 與 token
+
+Production 開啟 `TAIGI_ENFORCE_OPEN_ACCESS_QUOTA=true`，即使 `TAIGI_REQUIRE_ACCESS_TOKEN=false`，匿名工作仍由 SQLite 原子保留每日 jobs／characters 的 subject 與 global quota。舊日期會被清理；quota DB 不需要保存原文、POJ、音訊或 token。
+
+正式公開服務的匿名訪客共同使用每日 120 jobs／60,000 字；這能容納一份
+30,000 字輸入在 280 字分段下所需的最多 108 段，卻不是每位訪客各有一份額度。
+本機 Compose 預設提高為單機每日 500 jobs／200,000 字，避免沿用 upstream
+20-job 公開預設而讓合法長文中途停止；管理者仍可用同名環境變數調低。
+
+目前線上服務可匿名使用，因此前端應讓 token 留空。若另一個部署改成 `TAIGI_REQUIRE_ACCESS_TOKEN=true`，每位使用者應使用不同高熵 token，server 只設定 `subject=sha256(token)`；前端只能把 plaintext token 放在 `sessionStorage`，不得放進 repo、bundle、URL、`localStorage`、log、Service Worker 或音訊 cache。缺少與錯誤 token 回相同 401。
 
 ## Exact web origins
 
 `AWEI_ALLOWED_WEB_ORIGINS` 是逗號分隔的完整 origin，例如：
 
 ```dotenv
-AWEI_ALLOWED_WEB_ORIGINS=https://yazelin.github.io,https://preview.example.com
-AWEI_ALLOW_LOCALHOST_ORIGINS=true
+AWEI_ALLOWED_WEB_ORIGINS=https://yazelin.github.io
+AWEI_ALLOW_LOCALHOST_ORIGINS=false
+AWEI_REQUIRE_WEB_ORIGIN=true
 ```
 
-不得填 `*`、path、query、fragment 或尾斜線；非 localhost 的 HTTP origin 會在
-啟動時直接失敗。本機開發預設精確接受任意 port 的
-`http(s)://localhost` 與 `http(s)://127.0.0.1`，可在遠端環境設
-`AWEI_ALLOW_LOCALHOST_ORIGINS=false`。任何帶有未允許 Origin 的 actual
-request（包含 `/health`）回 403，preflight 回 400，且不含
-`Access-Control-Allow-Origin`；舊 Chrome extension origin 也不在白名單。
+不得填 `*`、path、query、fragment 或尾斜線；非 localhost 的 HTTP origin 在啟動時失敗。帶有未允許 Origin 的 actual request 會被 wrapper 拒絕。沒有 Origin 的監控 probe 是否允許，應由 reverse proxy／`AWEI_REQUIRE_WEB_ORIGIN` 與路由規則共同限制。
 
-沒有 Origin 的 health probe、reverse-proxy 與 CLI request 仍可通過 origin
-gate；同網域前端若瀏覽器送出 Origin，仍須把該 origin 明列在設定中。遠端部署
-務必同時開 Bearer access control。CORS 只允許
-`Authorization`、`Content-Type` 與 GET／POST／DELETE／OPTIONS，從未允許 `*`。
+CORS 只允許 `Authorization`、`Content-Type` 及 GET／POST／DELETE／OPTIONS，從未把 CORS 當成 quota 或 authentication 的替代品。
 
-從公開 HTTPS 網頁連到 `127.0.0.1` 時，Chrome 142 起會先顯示「本機網路存取」
-權限提示；使用者拒絕後，網頁就不能連本機後端。這是瀏覽器的安全邊界，不應以
-關閉安全設定繞過。前端必須由使用者按下檢查／朗讀後才發出請求，讓權限提示有
-清楚脈絡。見 [Chrome Local Network Access 說明](https://developer.chrome.com/blog/local-network-access)。
+從公開 HTTPS 頁面連 `127.0.0.1` 時，瀏覽器可能要求「本機網路存取」權限；使用者拒絕後無法連本機後端，不應用關閉瀏覽器安全功能來繞過。
 
 ## 不下載模型的 mock smoke
 
-Mock 會產生 deterministic 測試 WAV，**不是台語 TTS**：
+Mock 只產生 deterministic 測試 WAV，**不是台語 TTS**：
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e 'server[dev]'
-TAIGI_PROVIDER_MODE=mock uvicorn awei_voice_server.app:app \
+TAIGI_PROVIDER_MODE=mock \
+AWEI_ALLOWED_WEB_ORIGINS=https://yazelin.github.io \
+uvicorn awei_voice_server.app:create_app --factory \
   --host 127.0.0.1 --port 8765
 curl http://127.0.0.1:8765/health
 ```
 
-Docker smoke 同樣不裝 Torch、不下載模型：
+Docker smoke：
 
 ```bash
 AWEI_INSTALL_LOCAL_MMS=0 TAIGI_PROVIDER_MODE=mock \
@@ -99,12 +123,11 @@ AWEI_INSTALL_LOCAL_MMS=0 TAIGI_PROVIDER_MODE=mock \
 curl http://127.0.0.1:8765/health
 ```
 
-預期 health 明列 `mode: "mock"`、`mock:taigi-translator` 與
-`mock:wav-synthesizer`，畫面也必須標成測試音訊。
+Mock health 與畫面必須清楚標成測試 provider，不能拿來聲稱台語已能使用。
 
-## 本機 Ollama + MMS
+## 本機 Ollama＋MMS
 
-這是需要家人／管理者安裝的 reference path，不是要求長輩自行設定：
+這條路徑需要家人／管理者設定，不要求長輩自行安裝：
 
 ```bash
 ollama serve
@@ -115,80 +138,67 @@ python -m pip install --index-url https://download.pytorch.org/whl/cpu \
   'torch>=2.6,<3'
 python -m pip install -e 'server[mms]'
 TAIGI_PROVIDER_MODE=concrete \
+TAIGI_TRANSLATOR_PROVIDER=ollama \
+TAIGI_TTS_PROVIDER=mms \
+TAIGI_MANDARIN_TTS_PROVIDER=edge \
+AWEI_ALLOWED_WEB_ORIGINS=https://yazelin.github.io \
+AWEI_ALLOW_LOCALHOST_ORIGINS=true \
 TAIGI_OLLAMA_BASE_URL=http://127.0.0.1:11434 \
 TAIGI_OLLAMA_MODEL=qwen3:4b-instruct-2507-q4_K_M \
 TAIGI_MMS_MODEL=facebook/mms-tts-nan \
-uvicorn awei_voice_server.app:app --host 127.0.0.1 --port 8765
+TAIGI_DAILY_SUBJECT_JOB_LIMIT=500 \
+TAIGI_DAILY_SUBJECT_CHARACTER_LIMIT=200000 \
+TAIGI_DAILY_GLOBAL_JOB_LIMIT=500 \
+TAIGI_DAILY_GLOBAL_CHARACTER_LIMIT=200000 \
+uvicorn awei_voice_server.app:create_app --factory \
+  --host 127.0.0.1 --port 8765
 ```
 
-第一次真實 synthesis 才會 lazy-load／下載 MMS 權重。保持外網、完成一次真人可
-辨識的 job，再保留 Ollama 與 Hugging Face cache；之後拔除外網重啟並再跑同一
-段 smoke，才算驗證「本機離線服務」。只有 `/health` 成功不算。
+第一次真實 synthesis 會下載／lazy-load MMS。只有完成一個真人可辨識的 job、保留 Ollama 與 Hugging Face cache，接著拔除外網並再次完成華語→POJ→MMS smoke，才算本機台語離線驗證。`/health` 成功不算。
 
-Compose 也提供 optional Ollama profile，並用 volume 保存 Ollama 與 MMS cache：
+本機沒有外網時：
 
-```bash
-docker compose --profile local-model up -d ollama
-docker compose exec ollama ollama pull qwen3:4b-instruct-2507-q4_K_M
-docker compose up --build backend
-```
-
-Backend image 以非 root `awei` 使用者執行、read-only root filesystem、drop all
-capabilities，並把模型與 quota 寫進各自 volume。Host port 只綁
-`127.0.0.1`。
+- Ollama＋MMS 台語 route 可在模型齊全後運作。
+- POJ 直讀可使用 MMS，不需 Ollama。
+- edge-tts 台灣國語備援不可用；應改用裝置 `zh-TW` voice。
 
 ## 遠端 HTTPS 部署
 
-Compose 刻意不提供公開 HTTP listener；將 host 上的 HTTPS reverse proxy 接到
-`127.0.0.1:8765`，只公開 `/health`、`/v1/access` 與
-`/v1/synthesis-jobs[/…]`，並另外設定 request-size、create/poll rate limit 與
-TLS。前端 endpoint 必須是 HTTPS。
+Container host port 只綁 `127.0.0.1`；由 HTTPS reverse proxy 公開 `/awei-voice/health`、`/awei-voice/v1/access` 與 `/awei-voice/v1/synthesis-jobs[/…]`，並設定 TLS、request-size、IP rate limit、timeout 與正確 path stripping。不要公開 direct synthesis。
 
-遠端至少設定：
+Production 類型設定：
 
 ```dotenv
 AWEI_ALLOWED_WEB_ORIGINS=https://yazelin.github.io
 AWEI_ALLOW_LOCALHOST_ORIGINS=false
-TAIGI_REQUIRE_ACCESS_TOKEN=true
-TAIGI_ALLOW_DIRECT_SYNTHESIS=false
-TAIGI_ACCESS_TOKEN_HASHES=tester-a=<64-char-lowercase-sha256>
-```
+AWEI_REQUIRE_WEB_ORIGIN=true
 
-每位使用者給不同高熵 token，server 只存
-`subject=sha256(token)`。不要把 plaintext token 或 provider key 放進 repo、前端
-bundle、URL、log 或 reverse-proxy access log；前端也只能存於該分頁的
-`sessionStorage`。缺少／錯誤 token 都回相同 401。Quota SQLite 只保存假名
-subject 與計數，不保存原文、台語稿、音訊或 token。
-
-遠端若改用 OpenAI-compatible／Gemini translator 或 remote TTS，文字會離開部署
-主機；營運者必須在設定畫面與隱私文件揭露實際 provider、費用、保存／訓練條款
-與資料處理者。本機 Ollama+MMS 的隱私說明不可套用到這種路徑。
-
-例如 generic OpenAI-compatible translator + remote Taiwanese Hokkien TTS：
-
-```dotenv
+TAIGI_PROVIDER_MODE=concrete
 TAIGI_TRANSLATOR_PROVIDER=openai_compatible
-TAIGI_OPENAI_BASE_URL=https://translator.example.com/v1
-TAIGI_OPENAI_API_KEY=<server-only-key>
-TAIGI_OPENAI_MODEL=<exact-model-name>
-TAIGI_TTS_PROVIDER=remote
-TAIGI_REMOTE_TTS_URL=https://tts.example.com/synthesize
-TAIGI_REMOTE_TTS_API_KEY=<server-only-key>
+TAIGI_OPENAI_BASE_URL=https://api.groq.com/openai/v1
+TAIGI_OPENAI_API_KEY=<server-only-secret>
+TAIGI_OPENAI_MODEL=<tested-groq-model>
+TAIGI_TTS_PROVIDER=mms
+TAIGI_MMS_MODEL=facebook/mms-tts-nan
+TAIGI_MANDARIN_TTS_PROVIDER=edge
+TAIGI_EDGE_TTS_VOICE=zh-TW-HsiaoChenNeural
+
+TAIGI_REQUIRE_ACCESS_TOKEN=false
+TAIGI_ENFORCE_OPEN_ACCESS_QUOTA=true
+TAIGI_ALLOW_DIRECT_SYNTHESIS=false
 ```
 
-Remote TTS 必須接受 `{text, language: "nan-TW", rate}` 並回傳
-`{audio_base64, mime_type: "audio/wav"}`。它也必須經母語試聽；「遠端」不代表已
-驗證台灣腔。這種部署不需要 MMS 時，以 `AWEI_INSTALL_LOCAL_MMS=0` 建 image，
-避免安裝未使用的 Torch／MMS runtime。
+Groq key 只能存在 server secret。Reverse-proxy access log 不應記錄 Authorization、request body 或 query 中的敏感內容。
+
+若改用 Gemini、Ollama 或 remote TTS，必須更新 health provider 身分、隱私說明及第三方 notices；不能繼續宣稱「Groq 收華語、MMS 留本機」。
 
 ## 測試
 
-測試注入 upstream mock provider，不會連 Ollama 或下載 MMS：
+測試注入 provider doubles，不連 Groq／edge-tts、不下載 MMS：
 
 ```bash
 source .venv/bin/activate
 python -m pytest -q test_server
 ```
 
-涵蓋 configured origin、localhost、拒絕未列名 origin、CORS preflight、health、
-Bearer Authorization passthrough、async job 與固定關閉 direct synthesis。
+至少涵蓋 exact origin、匿名 quota、async job、三種 language pair、拒絕漢字 `nan-Latn-TW`、provider 身分、取消與 direct synthesis 關閉。前端另以 `npm test`、`npm run build` 驗證 contract 與介面。

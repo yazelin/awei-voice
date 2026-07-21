@@ -16,6 +16,8 @@ COPY pyproject.toml ./
 COPY awei_voice_server ./awei_voice_server
 
 ARG INSTALL_LOCAL_MMS=1
+ARG AWEI_UID=999
+ARG AWEI_GID=999
 RUN if [ "$INSTALL_LOCAL_MMS" = "1" ]; then \
       python -m pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cpu \
@@ -27,8 +29,8 @@ RUN if [ "$INSTALL_LOCAL_MMS" = "1" ]; then \
     && apt-get purge --yes git \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system awei \
-    && useradd --system --gid awei --create-home awei \
+    && groupadd --system --gid "$AWEI_GID" awei \
+    && useradd --system --uid "$AWEI_UID" --gid awei --create-home awei \
     && mkdir -p /var/cache/awei /var/lib/awei \
     && chown -R awei:awei /var/cache/awei /var/lib/awei
 
@@ -40,5 +42,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 # Async jobs are process-local. Keep exactly one worker until the upstream job
 # registry is replaced with shared durable infrastructure.
-CMD ["uvicorn", "awei_voice_server.app:app", "--host", "0.0.0.0", "--port", "8765", "--workers", "1"]
-
+CMD ["uvicorn", "awei_voice_server.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8765", "--workers", "1"]

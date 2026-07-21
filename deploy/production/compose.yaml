@@ -1,0 +1,100 @@
+name: awei-voice-production
+
+services:
+  backend:
+    image: awei-voice-server:production
+    build:
+      context: ../../server
+      args:
+        INSTALL_LOCAL_MMS: "1"
+    # `docker compose --env-file ...` supplies only the four explicitly mapped
+    # translator values below. Do not attach the old service's env file to this
+    # container: it also contains extension/auth settings that are outside this
+    # web-only service's trust boundary.
+    environment:
+      AWEI_ALLOWED_WEB_ORIGINS: "https://yazelin.github.io"
+      AWEI_ALLOW_LOCALHOST_ORIGINS: "false"
+      AWEI_REQUIRE_WEB_ORIGIN: "true"
+      TAIGI_PROVIDER_MODE: "concrete"
+      TAIGI_TRANSLATOR_PROVIDER: "openai_compatible"
+      TAIGI_TTS_PROVIDER: "mms"
+      TAIGI_OPENAI_BASE_URL: "${TAIGI_OPENAI_BASE_URL:?TAIGI_OPENAI_BASE_URL is required}"
+      TAIGI_OPENAI_API_KEY: "${TAIGI_OPENAI_API_KEY:?TAIGI_OPENAI_API_KEY is required}"
+      TAIGI_OPENAI_MODEL: "${TAIGI_OPENAI_MODEL:?TAIGI_OPENAI_MODEL is required}"
+      TAIGI_OPENAI_TIMEOUT_SECONDS: "${TAIGI_OPENAI_TIMEOUT_SECONDS:-45}"
+      TAIGI_MANDARIN_TTS_PROVIDER: "edge"
+      TAIGI_EDGE_TTS_VOICE: "zh-TW-HsiaoChenNeural"
+      TAIGI_EDGE_TTS_TIMEOUT_SECONDS: "45"
+      TAIGI_EXTENSION_IDS: ""
+      TAIGI_ALLOW_LOCALHOST_ORIGINS: "false"
+      TAIGI_REQUIRE_ALLOWED_ORIGIN: "false"
+      TAIGI_REQUIRE_ACCESS_TOKEN: "false"
+      TAIGI_ENFORCE_OPEN_ACCESS_QUOTA: "true"
+      TAIGI_ACCESS_TOKEN_HASHES: ""
+      TAIGI_ALLOW_DIRECT_SYNTHESIS: "false"
+      TAIGI_QUOTA_DATABASE_PATH: /var/lib/awei/quota.sqlite3
+      # 30,000 frontend graphemes can require 108 jobs at 280/segment. Keep
+      # enough headroom for one maximum-size accepted document, while nginx
+      # and the shared daily character cap still bound public abuse.
+      TAIGI_DAILY_SUBJECT_JOB_LIMIT: "120"
+      TAIGI_DAILY_SUBJECT_CHARACTER_LIMIT: "60000"
+      TAIGI_DAILY_GLOBAL_JOB_LIMIT: "120"
+      TAIGI_DAILY_GLOBAL_CHARACTER_LIMIT: "60000"
+      TAIGI_MAX_TEXT_CHARS: "600"
+      TAIGI_MAX_TRANSLATED_CHARS: "6000"
+      TAIGI_MAX_AUDIO_BYTES: "16777216"
+      TAIGI_MMS_MODEL: "${TAIGI_MMS_MODEL:-facebook/mms-tts-nan}"
+      TAIGI_MMS_DEVICE: "${TAIGI_MMS_DEVICE:-cpu}"
+      TAIGI_MMS_TIMEOUT_SECONDS: "480"
+      TAIGI_MAX_ACTIVE_JOBS: "2"
+      TAIGI_MAX_OUTSTANDING_JOBS: "8"
+      TAIGI_MAX_OUTSTANDING_JOBS_PER_SUBJECT: "8"
+      TAIGI_MAX_TERMINAL_RESULT_BYTES: "67108864"
+      TAIGI_MAX_TERMINAL_RESULT_BYTES_PER_SUBJECT: "67108864"
+      TAIGI_TERMINAL_JOB_TTL_SECONDS: "600"
+    # nginx reaches this port only through the existing private edge network.
+    # Deliberately publish no host port.
+    expose:
+      - "8765"
+    networks:
+      taigi_news_reader_edge:
+        aliases:
+          - awei-voice-backend
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    volumes:
+      # The old service and this service share immutable HF model artifacts,
+      # but never share their SQLite quota state.
+      - model-cache:/var/cache/awei
+      - quota-data:/var/lib/awei
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    pids_limit: 512
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 512m
+    memswap_limit: 2g
+    cpus: "4.0"
+    deploy:
+      replicas: 1
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  model-cache:
+    external: true
+    name: taigi-news-reader-lan_model-cache
+  quota-data:
+
+networks:
+  taigi_news_reader_edge:
+    external: true
+    name: taigi_news_reader_edge

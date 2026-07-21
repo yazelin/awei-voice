@@ -23,25 +23,34 @@
     <main id="privacy-content" class="page-shell">
       <article class="truth-card">
         <p><strong>生效日：2026-07-21</strong></p>
-        <h2>文件先留在你的裝置</h2>
+        <h2>匯入文件先留在你的裝置</h2>
         <p>
-          輸入、貼上或匯入的 TXT、Markdown、PDF、DOCX 都先在瀏覽器內解析。選取文件不會自動上傳；完整原文預設只存在目前分頁。
+          輸入、貼上或匯入的 TXT、Markdown、PDF、DOCX 都先在瀏覽器內解析。選取文件不會自動上傳；原始檔、檔名與完整原文預設只存在目前分頁。
         </p>
-        <h2>什麼時候會送出文字？</h2>
+        <h2>按下朗讀後會送到哪裡？</h2>
         <p>
-          「裝置語音」不連本專案的自訂 TTS endpoint，但標為「可能需連網」的系統 voice 仍可能由瀏覽器、作業系統或其語音供應者處理文字；即使標成「裝置內」，也應實際斷網確認。只有選擇台語、本機服務或省流量服務，並按下「開始朗讀」後，本專案才會把當下需要合成的文字分段送到畫面上指定的 endpoint。省流量模式每段最多 280 字。
+          網站只有在你按下「開始朗讀」後，才傳送當下要播放的文字分段；省流量服務每段最多 280 字，不傳原始文件。裝置 voice 可能在本機處理，也可能由瀏覽器或作業系統送給其供應者，<code>localService</code> 標記不能取代實際斷網測試。
         </p>
-        <h2>邀請碼與服務網址</h2>
+        <ul>
+          <li><strong>華語翻台語：</strong>推薦後端會收到華語分段並送到 Groq 轉成 POJ；POJ 再由部署主機上的 MMS 產生音訊。</li>
+          <li><strong>POJ 調符直讀：</strong>相容 POJ 直接交給部署主機上的 MMS，不呼叫 Groq；不接受數字調號，也不支援漢字台文直接朗讀。</li>
+          <li><strong>線上台灣國語：</strong>推薦後端會收到國語分段，再透過非官方 edge-tts 連接 Microsoft Edge 使用的線上語音服務。此路徑需要網路且沒有本專案保證的 SLA。</li>
+        </ul>
+        <h2>匿名配額、邀請碼與服務網址</h2>
         <p>
-          服務網址可留到下次使用。Bearer 邀請碼只放在這個分頁的 sessionStorage，不會進入網址、Service Worker、音訊快取或永久儲存；關閉分頁後消失。
+          推薦服務為 <code>https://ching-tech.ddns.net/awei-voice</code>，不要求邀請碼，匿名使用共用限額；服務網址可留到下次使用。若改連邀請制部署，Bearer token 只放在這個分頁的 sessionStorage，不會進入網址、程式 bundle、Service Worker、音訊快取、log 或永久儲存；關閉分頁後消失。
         </p>
-        <h2>保存的台語語音</h2>
+        <h2>保存的語音</h2>
         <p>
-          保存預設關閉。勾選後，音訊、台語稿、provider 與必要 cache metadata 會存到 IndexedDB；上限 50 MiB，採 7 天 LRU，可在首頁逐筆下載／刪除或全部刪除。瀏覽器或使用者仍可能清除這些資料。
+          保存預設關閉。勾選後，音訊、必要朗讀稿、provider 與 cache metadata 會存到 IndexedDB；上限 50 MiB，採 7 天 LRU，可在首頁逐筆下載／刪除或全部刪除。瀏覽器或使用者仍可能清除這些資料。
+        </p>
+        <h2>離線能力的邊界</h2>
+        <p>
+          完成快取後，PWA 外殼、文件解析和已保存音訊可以離線使用；新產生的線上國語、Groq 翻譯與線上台語音訊仍需要網路。PWA 可離線開啟，不代表能離線產生任意新語音。
         </p>
         <h2>不做什麼</h2>
         <p>
-          本專案沒有廣告、analytics、telemetry 或追蹤像素，不建立使用者輪廓、不出售資料。遠端語音服務與 GitHub Pages 各有自己的資料處理政策。
+          本專案沒有廣告、analytics、telemetry 或追蹤像素，不建立使用者輪廓、不出售資料。GitHub Pages、後端主機、Groq、Microsoft 相關線上語音服務與使用者自行指定的 provider 各有自己的資料處理政策。
         </p>
         <h2>問題與刪除</h2>
         <p>

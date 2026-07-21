@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "Web-origin wrapper for the Awei Voice Taiwanese Hokkien synthesis backend"
 requires-python = ">=3.12"
 dependencies = [
-  "taigi-news-reader-backend @ git+https://github.com/yazelin/taigi-news-reader.git@967d7370fb5f3b22cc4492c5ee5753fba3ae2904#subdirectory=backend",
+  "edge-tts==7.2.8",
+  "taigi-news-reader-backend @ git+https://github.com/yazelin/taigi-news-reader.git@df4c211e3e69215c9766b2304d8443e1cb8efa57#subdirectory=backend",
 ]
 
 [project.optional-dependencies]

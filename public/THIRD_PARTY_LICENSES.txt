@@ -6,6 +6,27 @@ parsing. Package source URLs are included for identification. The list excludes
 the optional Node-only @napi-rs/canvas packages, which are disabled by the
 browser build and are not present in the deployed bundle.
 
+HOSTED SPEECH SERVICE NOTICE
+
+The optional hosted speech backend is separate from this JavaScript bundle.
+It uses facebook/mms-tts-nan (CC BY-NC 4.0) for experimental Min Nan audio and
+edge-tts for an unofficial, network-only Taiwan Mandarin fallback. The current
+edge-tts library is LGPL-3.0 except for its MIT-licensed srt_composer.py file.
+edge-tts is an unofficial client for the online speech service used by
+Microsoft Edge; this project provides no service-level or continuity guarantee
+for that service. The production Mandarin-to-Taigi translation path sends the
+current Mandarin segment to Groq before local MMS synthesis. Direct POJ input
+does not call Groq. See the complete notices and data-flow limitations at:
+https://github.com/yazelin/awei-voice/blob/main/THIRD_PARTY_NOTICES.md
+
+MMS model and license:
+https://huggingface.co/facebook/mms-tts-nan
+https://creativecommons.org/licenses/by-nc/4.0/
+
+edge-tts source and license:
+https://github.com/rany2/edge-tts
+https://github.com/rany2/edge-tts/blob/master/LICENSE
+
 ==============================================================================
 @xmldom/xmldom@0.8.13
 SPDX / detected license: MIT

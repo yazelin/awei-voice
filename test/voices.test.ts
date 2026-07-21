@@ -7,6 +7,7 @@ import {
   isMandarinVoice,
   isTaigiVoice,
   loadVoices,
+  watchVoices,
   type VoiceLike,
   type VoiceSource
 } from "../src/lib/voices";
@@ -56,6 +57,28 @@ describe("voice classification", () => {
     current = [expected];
     (listener as EventListener | null)?.(new Event("voiceschanged"));
     await expect(pending).resolves.toEqual([expected]);
+    expect(listener).toBeNull();
+  });
+
+  it("keeps observing voices that arrive after the first-load window", () => {
+    let current: SpeechSynthesisVoice[] = [];
+    let listener: EventListener | null = null;
+    const received: SpeechSynthesisVoice[][] = [];
+    const expected = voice("台灣國語", "zh-TW") as SpeechSynthesisVoice;
+    const source: VoiceSource = {
+      getVoices: () => current,
+      addEventListener: (_type, next) => { listener = next; },
+      removeEventListener: (_type, next) => {
+        if (listener === next) listener = null;
+      }
+    };
+
+    const stop = watchVoices((voices) => received.push(voices), source);
+    current = [expected];
+    (listener as EventListener | null)?.(new Event("voiceschanged"));
+    expect(received).toEqual([[expected]]);
+
+    stop();
     expect(listener).toBeNull();
   });
 });

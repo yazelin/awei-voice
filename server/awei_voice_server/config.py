@@ -59,6 +59,7 @@ class WebSettings:
 
     allowed_web_origins: tuple[str, ...] = ()
     allow_localhost_origins: bool = True
+    require_web_origin: bool = False
 
     def __post_init__(self) -> None:
         validated = tuple(
@@ -79,6 +80,9 @@ class WebSettings:
             allowed_web_origins=origins,
             allow_localhost_origins=_get_bool(
                 "AWEI_ALLOW_LOCALHOST_ORIGINS", True
+            ),
+            require_web_origin=_get_bool(
+                "AWEI_REQUIRE_WEB_ORIGIN", False
             ),
         )
 

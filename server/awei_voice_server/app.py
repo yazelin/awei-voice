@@ -20,9 +20,11 @@ class WebOriginGateMiddleware:
 
     CORS response headers alone are not an authorization boundary. This gate
     therefore rejects a supplied, untrusted Origin before it reaches upstream.
-    Requests without Origin remain available to same-origin reverse proxies,
-    health tooling, and non-browser clients; Bearer authentication is the
-    actual caller credential when the upstream access controls are enabled.
+    Deployments may additionally require Origin on every /v1/ request. Health
+    tooling remains origin-free; a supplied Origin is always checked exactly.
+    Bearer authentication remains available when upstream access controls are
+    enabled, but the public web deployment instead combines this gate with
+    durable anonymous quota and edge per-IP limits.
     """
 
     def __init__(self, app: ASGIApp, *, settings: WebSettings) -> None:
@@ -38,6 +40,18 @@ class WebOriginGateMiddleware:
         if scope["type"] == "http":
             headers = dict(scope.get("headers", ()))
             raw_origin = headers.get(b"origin")
+            if (
+                raw_origin is None
+                and self.settings.require_web_origin
+                and scope.get("path", "").startswith("/v1/")
+            ):
+                response = JSONResponse(
+                    status_code=403,
+                    content={"detail": "request web origin is required"},
+                    headers={"Cache-Control": "no-store"},
+                )
+                await response(scope, receive, send)
+                return
             if raw_origin is not None:
                 try:
                     origin = raw_origin.decode("ascii")
@@ -80,6 +94,11 @@ def _web_upstream_settings(
         extension_ids=(),
         allow_localhost_origins=False,
         require_allowed_origin=False,
+        # Public web use may be token-free, but it is never unmetered. The
+        # shared open-access subject is still admitted atomically through the
+        # durable SQLite subject/global quota store.
+        enforce_open_access_quota=True,
+        mandarin_tts_provider="edge",
         allow_direct_synthesis=False,
     )
 
@@ -114,6 +133,3 @@ def create_app(
         ],
         max_age=600,
     )
-
-
-app = create_app()

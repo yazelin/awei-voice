@@ -1,0 +1,28 @@
+# Load once in nginx's `http` context. The key is the direct connection IP;
+# never trust a public request's X-Forwarded-For as the rate-limit identity.
+map $http_origin $awei_web_origin_allowed {
+    default 0;
+    "https://yazelin.github.io" 1;
+}
+
+map $http_origin $awei_web_cors_origin {
+    default "";
+    "https://yazelin.github.io" "https://yazelin.github.io";
+}
+
+limit_req_zone $binary_remote_addr zone=awei_health:1m rate=12r/m;
+limit_req_zone $binary_remote_addr zone=awei_access:1m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=awei_create:1m rate=6r/m;
+limit_req_zone $binary_remote_addr zone=awei_jobs:1m rate=180r/m;
+limit_conn_zone $binary_remote_addr zone=awei_connections:1m;
+limit_conn_zone $server_name zone=awei_global_connections:1m;
+
+# nginx 1.27.3+ dynamically re-resolves the container alias on the dedicated
+# external Docker network. The backend has no published host port.
+upstream awei_voice_backend {
+    zone awei_voice_backend 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 2s;
+    server awei-voice-backend:8765 resolve;
+    keepalive 8;
+}

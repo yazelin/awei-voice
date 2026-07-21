@@ -109,3 +109,14 @@ export function loadVoices(
     source.addEventListener?.("voiceschanged", changed);
   });
 }
+
+/** Keep listening after the first-load timeout; some mobile voices arrive later. */
+export function watchVoices(
+  listener: (voices: SpeechSynthesisVoice[]) => void,
+  source: VoiceSource | null = defaultVoiceSource()
+): () => void {
+  if (!source?.addEventListener) return () => undefined;
+  const changed: EventListener = () => listener([...source.getVoices()]);
+  source.addEventListener("voiceschanged", changed);
+  return () => source.removeEventListener?.("voiceschanged", changed);
+}

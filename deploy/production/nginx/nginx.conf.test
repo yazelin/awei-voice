@@ -1,0 +1,16 @@
+worker_processes 1;
+error_log /dev/stderr notice;
+pid /tmp/nginx.pid;
+
+events { worker_connections 128; }
+
+http {
+    include /etc/nginx/mime.types;
+    include /config/00-awei-voice-http.conf.example;
+
+    server {
+        listen 8080;
+        server_name ching-tech.ddns.net;
+        include /config/awei-voice-locations.inc;
+    }
+}

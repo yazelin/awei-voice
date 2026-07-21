@@ -375,6 +375,27 @@ select:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.input-mode-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.taigi-input-settings {
+  padding-top: 1rem;
+  margin-top: 1rem;
+  border-top: 2px solid var(--line);
+}
+
+.taigi-input-settings legend {
+  padding: 0;
+  margin-bottom: 0.7rem;
+  font-size: 1.1rem;
+  font-weight: 850;
+}
+
+.taigi-input-settings > .field-help {
+  margin: 0.7rem 0 0;
+}
+
 .choice-card {
   position: relative;
   display: grid;
@@ -465,6 +486,10 @@ select:focus {
   justify-content: flex-start;
   flex-wrap: wrap;
   margin-top: 0.9rem;
+}
+
+#device-voice-tools {
+  margin: -0.25rem 0 1rem;
 }
 
 .option-row {
@@ -575,6 +600,13 @@ select:focus {
   background: #fff7ed;
 }
 
+.current-chunk-label {
+  margin: 0 0 0.25rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
 progress {
   width: 100%;
   height: 1rem;
@@ -588,32 +620,49 @@ progress {
   margin-top: 0.9rem;
 }
 
-.taigi-details {
-  margin-top: 0.9rem;
+.taigi-result {
+  padding: 1rem;
+  margin-top: 1rem;
+  border: 3px solid #c2410c;
+  border-radius: 0.8rem;
+  background: #fff7ed;
 }
 
-.taigi-details summary {
-  min-height: 2.8rem;
-  padding: 0.55rem;
-  cursor: pointer;
-  font-weight: 800;
+.taigi-result h3 {
+  margin-bottom: 0.45rem;
 }
 
-.taigi-details dl div,
+.taigi-result-text {
+  padding: 0.8rem;
+  margin-bottom: 0.6rem;
+  border-radius: 0.6rem;
+  background: white;
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.taigi-result dl {
+  margin: 0;
+}
+
+.taigi-result dl div,
 .truth-list div {
   padding: 0.65rem 0;
   border-top: 1px solid var(--line);
 }
 
-.taigi-details dt,
+.taigi-result dt,
 .truth-list dt {
   font-weight: 850;
 }
 
-.taigi-details dd,
+.taigi-result dd,
 .truth-list dd {
   margin-left: 0;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .library-card,
@@ -661,6 +710,7 @@ progress {
 .saved-audio-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
 
@@ -719,7 +769,8 @@ progress {
   }
 
   .mode-grid,
-  .language-grid {
+  .language-grid,
+  .input-mode-grid {
     grid-template-columns: 1fr;
   }
 

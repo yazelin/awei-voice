@@ -20,7 +20,7 @@
         <div>
           <p class="eyebrow">阿瑋許的願</p>
           <h1>阿瑋好聲音</h1>
-          <p class="tagline">台灣國語、台語，貼上就唸給你聽</p>
+          <p class="tagline">台灣國語直接唸，華語也能翻成台語再唸</p>
         </div>
       </div>
       <div id="network-status" class="network-status" role="status">
@@ -89,14 +89,33 @@
             <label class="choice-card">
               <input type="radio" name="language" value="mandarin" checked />
               <span class="choice-title">台灣國語</span>
-              <span class="choice-copy">使用裝置標示為 zh-TW 的聲音</span>
+              <span class="choice-copy">優先使用裝置 zh-TW，也可選線上台灣國語</span>
             </label>
             <label class="choice-card">
               <input type="radio" name="language" value="taigi" />
               <span class="choice-title">台語 <small>Beta</small></span>
-              <span class="choice-copy">真正台語裝置聲音或台語語音服務</span>
+              <span class="choice-copy">華語翻台語，或直接朗讀調符 POJ</span>
             </label>
           </fieldset>
+
+          <div id="taigi-input-settings" class="taigi-input-settings" hidden>
+            <fieldset class="choice-grid input-mode-grid" aria-describedby="taigi-input-help">
+              <legend id="taigi-input-heading">你放入的是哪一種文字？</legend>
+              <label class="choice-card">
+                <input type="radio" name="taigiInputMode" value="translate" checked />
+                <span class="choice-title">華語翻成台語</span>
+                <span class="choice-copy">先把華語轉成台語羅馬字，再產生真正的台語語音</span>
+              </label>
+              <label class="choice-card">
+                <input type="radio" name="taigiInputMode" value="direct" />
+                <span class="choice-title">調符 POJ 直接朗讀</span>
+                <span class="choice-copy">不支援漢字、數字調號及模型字表以外的拉丁字母</span>
+              </label>
+            </fieldset>
+            <p id="taigi-input-help" class="field-help">
+              「華語翻成台語」一定要使用台語語音服務；直讀請使用 á、à、â、ā 等調符 POJ。
+            </p>
+          </div>
         </section>
 
         <section class="step-card" aria-labelledby="mode-heading">
@@ -113,22 +132,22 @@
             <label class="choice-card">
               <input type="radio" name="connection" value="device" checked />
               <span class="choice-title">裝置語音</span>
-              <span class="choice-copy">不連自訂服務；系統聲音仍可能需要網路</span>
+              <span class="choice-copy">只直接朗讀；系統聲音仍可能需要網路</span>
             </label>
             <label class="choice-card">
               <input type="radio" name="connection" value="local" />
               <span class="choice-title">本機服務</span>
-              <span class="choice-copy">家人先裝好模型，之後可以不連外網</span>
+              <span class="choice-copy">台語限定；家人先裝好模型，之後可以不連外網</span>
             </label>
             <label class="choice-card">
               <input type="radio" name="connection" value="saving" />
               <span class="choice-title">省流量服務</span>
-              <span class="choice-copy">逐段產生、產完就播，保存後重播不耗流量</span>
+              <span class="choice-copy">已填好推薦服務；逐段產生，保存後重播不耗流量</span>
             </label>
           </fieldset>
 
           <div id="service-settings" class="service-settings" hidden>
-            <h3>台語語音服務</h3>
+            <h3>線上／本機語音服務</h3>
             <label for="backend-url">服務網址</label>
             <input
               id="backend-url"
@@ -154,8 +173,11 @@
               type="password"
               autocomplete="off"
               spellcheck="false"
+              aria-describedby="backend-token-help"
             />
-            <p class="field-help">邀請碼只留在這個分頁，關閉後消失。</p>
+            <p id="backend-token-help" class="field-help">
+              可以留空使用公開限額；邀請碼只留在這個分頁，關閉後消失。
+            </p>
 
             <div class="service-actions">
               <button id="check-backend" class="button button-secondary" type="button">
@@ -181,6 +203,13 @@
             </select>
           </div>
 
+          <div id="device-voice-tools" class="service-actions">
+            <button id="refresh-voices" class="button button-secondary" type="button">
+              重新偵測裝置聲音
+            </button>
+            <p id="voice-status" class="field-status" aria-live="polite"></p>
+          </div>
+
           <fieldset class="rate-fieldset">
             <legend>速度</legend>
             <div class="rate-choices">
@@ -192,7 +221,7 @@
 
           <label id="save-audio-row" class="check-row" hidden>
             <input id="save-audio" type="checkbox" />
-            <span>保存產生的台語語音，之後可以離線重播</span>
+            <span>保存產生的語音，之後可以離線重播</span>
           </label>
 
           <button id="start-reading" class="button button-primary start-button" type="submit">
@@ -211,6 +240,7 @@
           <p id="player-progress">第 0 段，共 0 段</p>
         </div>
         <p id="player-status" class="player-status" aria-live="polite">準備中</p>
+        <p id="current-chunk-label" class="current-chunk-label">這一段的原文</p>
         <p id="current-chunk" class="current-chunk"></p>
         <progress id="reading-progress" value="0" max="1">0%</progress>
 
@@ -221,13 +251,20 @@
           <button id="stop-reading" class="button button-danger" type="button">停止</button>
         </div>
 
-        <details class="taigi-details">
-          <summary>查看這段的台語稿與語音來源</summary>
+        <section
+          id="taigi-result"
+          class="taigi-result"
+          aria-labelledby="taigi-result-heading"
+          aria-live="polite"
+          hidden
+        >
+          <p class="eyebrow">轉換結果</p>
+          <h3 id="taigi-result-heading">這一段的台語稿（POJ）</h3>
+          <p id="taigi-text" class="taigi-result-text">尚未取得</p>
           <dl>
             <div><dt>語音來源</dt><dd id="provider-name">尚未取得</dd></div>
-            <div><dt>台語稿</dt><dd id="taigi-text">尚未取得</dd></div>
           </dl>
-        </details>
+        </section>
       </section>
 
       <section class="library-card" aria-labelledby="library-heading">
@@ -240,7 +277,8 @@
             全部刪除
           </button>
         </div>
-        <ul id="saved-audio-list" class="saved-audio-list" aria-label="已保存的台語語音" hidden></ul>
+        <p id="library-playback-status" class="field-status" role="status" aria-live="polite"></p>
+        <ul id="saved-audio-list" class="saved-audio-list" aria-label="已保存的語音" hidden></ul>
       </section>
 
       <section class="truth-card" aria-labelledby="truth-heading">
@@ -252,7 +290,7 @@
           </div>
           <div>
             <dt>台灣國語</dt>
-            <dd>只有裝置列出 zh-TW 聲音時可用；標為「裝置內」仍應實際斷網測試。</dd>
+            <dd>裝置有 zh-TW 聲音時可直接用；沒有時可明確改用省流量服務。</dd>
           </div>
           <div>
             <dt>台語</dt>
