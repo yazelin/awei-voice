@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">阿瑋好聲音</title>
+  <desc id="desc">貼上文字，用大字介面聽台灣國語，或把華語翻成台語再朗讀。</desc>
+  <rect width="1200" height="630" fill="#fffaf0"/>
+  <circle cx="1090" cy="-20" r="260" fill="#fde3c8"/>
+  <circle cx="100" cy="660" r="190" fill="#fbe8d6"/>
+
+  <g transform="translate(70 58)">
+    <rect width="64" height="64" rx="16" fill="#9a3412"/>
+    <path fill="#fffaf0" d="M12 12h40a6 6 0 0 1 6 6v27a6 6 0 0 1-6 6h-21l-13 10v-10h-6a6 6 0 0 1-6-6V18a6 6 0 0 1 6-6Z" transform="translate(2 2) scale(0.62)"/>
+    <text x="80" y="30" fill="#7c2d12" font-family="Noto Sans CJK TC, sans-serif" font-size="22" font-weight="800">阿瑋許的願</text>
+    <text x="80" y="56" fill="#17312b" font-family="Noto Sans CJK TC, sans-serif" font-size="30" font-weight="900">阿瑋好聲音</text>
+  </g>
+
+  <g font-family="Noto Sans CJK TC, sans-serif">
+    <text x="70" y="248" fill="#1c1917" font-size="66" font-weight="900">貼上文字，</text>
+    <text x="70" y="330" fill="#9a3412" font-size="72" font-weight="900">用聽的來理解</text>
+    <text x="74" y="384" fill="#57534e" font-size="26" font-weight="500">大字介面・台灣國語與台語一鍵切換</text>
+
+    <g transform="translate(72 428)" fill="#7c2d12" font-size="20" font-weight="700">
+      <rect x="0" y="0" width="150" height="43" rx="21.5" fill="#fbe8d6"/>
+      <text x="75" y="28" text-anchor="middle">TXT・PDF・DOCX</text>
+      <rect x="164" y="0" width="132" height="43" rx="21.5" fill="#fbe8d6"/>
+      <text x="230" y="28" text-anchor="middle">大字介面</text>
+      <rect x="310" y="0" width="150" height="43" rx="21.5" fill="#fbe8d6"/>
+      <text x="385" y="28" text-anchor="middle">保存後離線播</text>
+    </g>
+
+    <text x="74" y="536" fill="#57534e" font-size="21">華語直接聽，或翻成台語羅馬字（POJ）再朗讀</text>
+    <text x="74" y="572" fill="#78716c" font-size="19">台語為 Beta：MMS 開源語音模型，尚未經母語者驗收</text>
+  </g>
+
+  <g transform="translate(735 150)" font-family="Noto Sans CJK TC, sans-serif">
+    <rect width="395" height="340" rx="28" fill="#ffffff" stroke="#e7d6c0" stroke-width="3"/>
+
+    <rect x="28" y="28" width="339" height="72" rx="16" fill="#fffaf0" stroke="#e7d6c0" stroke-width="2"/>
+    <text x="52" y="59" fill="#78716c" font-size="16" font-weight="700">想朗讀的文字</text>
+    <text x="52" y="86" fill="#1c1917" font-size="22" font-weight="700">今天天氣真好。</text>
+
+    <g transform="translate(28 120)">
+      <rect width="163" height="56" rx="14" fill="#9a3412"/>
+      <text x="81" y="35" fill="#ffffff" font-size="20" font-weight="800" text-anchor="middle">台灣國語</text>
+      <rect x="176" y="0" width="163" height="56" rx="14" fill="#fbe8d6" stroke="#e7d6c0" stroke-width="2"/>
+      <text x="257" y="35" fill="#7c2d12" font-size="20" font-weight="800" text-anchor="middle">台語 Beta</text>
+    </g>
+
+    <g transform="translate(28 200)">
+      <rect width="339" height="60" rx="16" fill="#fbe8d6"/>
+      <polygon points="28,17 28,43 52,30" fill="#7c2d12"/>
+      <text x="72" y="36" fill="#7c2d12" font-size="21" font-weight="800">開始朗讀</text>
+    </g>
+
+    <text x="28" y="300" fill="#a8a29e" font-size="16">開頁先試・邀請碼可留空</text>
+  </g>
+</svg>
