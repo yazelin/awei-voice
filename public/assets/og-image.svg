@@ -6,8 +6,11 @@
   <circle cx="100" cy="660" r="190" fill="#fbe8d6"/>
 
   <g transform="translate(70 58)">
-    <rect width="64" height="64" rx="16" fill="#9a3412"/>
-    <path fill="#fffaf0" d="M12 12h40a6 6 0 0 1 6 6v27a6 6 0 0 1-6 6h-21l-13 10v-10h-6a6 6 0 0 1-6-6V18a6 6 0 0 1 6-6Z" transform="translate(2 2) scale(0.62)"/>
+    <g transform="scale(0.125)">
+      <rect width="512" height="512" rx="112" fill="#9a3412"/>
+      <path fill="#fffaf0" d="M102 112h308a42 42 0 0 1 42 42v190a42 42 0 0 1-42 42H245l-93 70v-70h-50a42 42 0 0 1-42-42V154a42 42 0 0 1 42-42Z"/>
+      <path fill="none" stroke="#9a3412" stroke-linecap="round" stroke-width="28" d="M151 264h34m38-54v108m54-142v176m54-112v48m54-80v112"/>
+    </g>
     <text x="80" y="30" fill="#7c2d12" font-family="Noto Sans CJK TC, sans-serif" font-size="22" font-weight="800">阿瑋許的願</text>
     <text x="80" y="56" fill="#17312b" font-family="Noto Sans CJK TC, sans-serif" font-size="30" font-weight="900">阿瑋好聲音</text>
   </g>
