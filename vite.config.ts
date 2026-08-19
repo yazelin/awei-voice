@@ -34,6 +34,11 @@ export default defineConfig({
           { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
           { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
           { src: "icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+        ],
+        // 安裝卡的預覽圖:narrow=手機直式、wide=桌機橫式,缺哪邊那個平台就退回陽春提示。
+        screenshots: [
+          { src: "screenshots/wide.webp", sizes: "1280x800", type: "image/webp", form_factor: "wide", label: "大字介面:貼上文字就能聽" },
+          { src: "screenshots/narrow.webp", sizes: "390x844", type: "image/webp", form_factor: "narrow", label: "手機直式:長輩友善的朗讀頁" }
         ]
       },
       workbox: {
